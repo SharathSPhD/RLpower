@@ -1,0 +1,57 @@
+# SB3 PPO training on FMU-direct path (Path A)
+# Read by: FMUDirectTrainer
+
+algorithm: PPO
+framework: stable_baselines3
+
+ppo:
+  n_steps: 2048                        # Steps per environment per rollout
+  batch_size: 256
+  n_epochs: 10                         # Gradient updates per rollout
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2                      # ε — PPO clipping coefficient
+  clip_range_vf: null                  # No VF clipping (null = disabled)
+  ent_coef: 0.01                       # Entropy bonus for exploration
+  vf_coef: 0.5                         # Value function loss weight
+  max_grad_norm: 0.5                   # Gradient clipping
+  normalize_advantage: true
+  learning_rate:
+    schedule: linear                   # Linear decay from initial to final
+    initial: 3.0e-4
+    final: 1.0e-5
+    # Warmup: constant for first 100K steps
+    warmup_steps: 100000
+
+network:
+  policy: MlpPolicy
+  net_arch:
+    pi: [256, 256, 128]               # Actor: ~200K parameters
+    vf: [256, 256, 128]               # Critic: ~200K parameters
+  activation_fn: relu                  # ReLU (not tanh — avoids vanishing gradients in 3-layer net)
+  ortho_init: true                     # Orthogonal weight initialization (PPO best practice)
+
+vec_env:
+  n_envs: 8                            # Parallel FMU instances on Grace CPU
+  vec_env_cls: SubprocVecEnv           # Process-level parallelism (not thread — FMU not thread-safe)
+  start_method: spawn                  # Required for ARM64 + FMPy
+
+training:
+  total_timesteps: 5_000_000
+  eval_freq: 50_000                    # Evaluate every 50K steps
+  eval_episodes: 10                    # Per-curriculum-phase evaluation
+  checkpoint_freq: 100_000             # Save checkpoint every 100K steps
+  log_dir: "artifacts/checkpoints/fmu_direct"
+  tensorboard_log: "artifacts/logs/fmu_direct"
+
+# RULE-C4: Checkpoint must include all of these
+checkpoint:
+  save_model_weights: true
+  save_vec_normalize_stats: true       # VecNormalize running mean/var
+  save_curriculum_phase: true
+  save_lagrange_multipliers: true
+  save_total_timesteps: true
+
+# Lagrange multiplier update frequency
+# Must match n_steps × n_envs to update at end of each rollout
+lagrange_update_freq_steps: 16384     # 2048 steps × 8 envs

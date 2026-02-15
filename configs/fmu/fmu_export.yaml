@@ -1,0 +1,63 @@
+# FMU compilation and runtime configuration
+# Read by: FMUExporter, OMCSessionWrapper
+
+export:
+  fmi_version: "2.0"
+  fmu_type: "cs"                          # Co-Simulation (not Model Exchange)
+  output_dir: "artifacts/fmu"
+  fmu_name: "SCO2_WHR"
+  modelica_source_dir: "artifacts/modelica"
+
+compiler:
+  omc_flags:
+    - "--fmuRuntimeDepends=modelica"       # Bundle external libs
+    - "--fmiFlags=s:cvode"                 # CVODE solver
+    - "-d=initialization"                  # Debug initialization failures
+  # RULE-P2: Two explicit tolerance settings — never use a single value
+  cvode_tolerance_training: 1.0e-4        # Used by FMUExporter(mode='training')
+  cvode_tolerance_validation: 1.0e-6     # Used by FMUExporter(mode='validation')
+  jacobian: finite_differences            # Finite-diff Jacobian (safer near critical point)
+  max_integration_order: 5
+
+runtime_deps:
+  # RULE-P5: FMUExporter.validate() checks these files exist in binaries/linux64/
+  # If missing, FMUExporter.inject_dependencies() copies them from /opt/libs/
+  required_libs:
+    - "libCoolProp.so"
+    - "libExternalMediaLib.so"
+  inject_target: "binaries/linux64"
+  lib_source_dir: "/opt/libs"             # Inside Docker; set by Dockerfile
+
+# Co-simulation timing
+communication_step_s: 5.0                # FMU step size during RL training
+max_steps_per_episode: 720              # 720 × 5s = 3600s = 1h simulated
+stop_time_s: 3600.0                     # Corresponds to max_steps_per_episode
+
+# Warm-up: run FMU for N seconds at design-point before RL takes control
+# Prevents CVODE divergence during first RL steps from cold initialization
+warmup_seconds: 60.0
+warmup_actions:
+  bypass_valve_opening: 0.0
+  igv_angle_normalized: 0.5
+  inventory_valve_opening: 0.5
+  cooling_flow_normalized: 0.5
+  split_ratio: 0.5
+
+# Error handling (RULE: wrap doStep in try-except)
+solver_failure:
+  reward_on_failure: -100.0
+  terminate_on_failure: true
+  max_consecutive_failures: 3           # Allow 3 retries before hard episode end
+  log_warnings: true                    # NEVER suppress; log at WARNING level
+
+# Physics validation (post-compilation checks)
+validation:
+  energy_balance_tolerance: 0.02       # 2% max delta in steady-state energy balance
+  mass_balance_tolerance: 0.001        # 0.1% CO₂ mass conservation
+  design_point_check:
+    T_turbine_inlet_c: 750.0
+    T_compressor_inlet_c: 32.5
+    P_high_mpa: 20.0
+    W_net_mwe: 10.0
+    eta_thermal: 0.47
+    tolerance_fraction: 0.05          # 5% tolerance on design-point check

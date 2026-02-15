@@ -1,0 +1,105 @@
+# Safety constraints and Lagrangian multiplier configuration
+# Read by: LagrangianPenaltyReward, LagrangeMultiplierUpdater, SCO2FMUEnv
+
+# ─── Hard Limits ─────────────────────────────────────────────────────────────
+# These are physical limits. Violations trigger Lagrange penalties during training.
+# CATASTROPHIC violations (below) trigger immediate episode termination.
+
+hard_constraints:
+  # Compressor inlet temperature (RULE-P1)
+  compressor_inlet_temp_min_c: 32.2       # Lagrange penalty threshold
+  compressor_inlet_temp_max_c: 34.0       # Upper efficiency bound
+  # Catastrophic: below this, two-phase flow enters compressor
+  compressor_inlet_temp_catastrophic_c: 31.5
+
+  # Turbine inlet temperature (material limit)
+  turbine_inlet_temp_min_c: 715.0        # Below this, efficiency unacceptable
+  turbine_inlet_temp_max_c: 820.0        # Above this, blade material limit
+
+  # High-side pressure
+  high_pressure_min_mpa: 14.0            # Below: cycle collapses
+  high_pressure_max_mpa: 22.0            # Above: vessel/seal overpressure limit
+
+  # Surge margins (RULE-P4)
+  surge_margin_main_min: 0.05            # 5% minimum — both compressors
+  surge_margin_recomp_min: 0.05
+
+  # Net power
+  net_power_min_mw: 0.5                  # Generator stay-online threshold
+
+  # Turbine inlet temperature change rate
+  turbine_temp_rate_max_c_per_min: 2.0   # Thermal shock prevention
+
+# Catastrophic violations → immediate episode termination + reward = -100
+catastrophic_violations:
+  - name: compressor_liquid_entry
+    condition: "T_compressor_inlet < compressor_inlet_temp_catastrophic_c"
+  - name: pressure_overpressure
+    condition: "P_high > 23.5"           # MPa — 1.5 MPa above hard limit for margin
+  - name: turbine_blade_overtemp
+    condition: "T_turbine_inlet > 830.0" # °C
+
+# ─── Lagrangian Multiplier Configuration ─────────────────────────────────────
+# Multipliers λₖ are updated via gradient ascent: λₖ ← max(0, λₖ + α·gₖ)
+# where gₖ = max(0, constraint_violation)²
+
+lagrangian:
+  constraints:
+    - name: compressor_inlet_temp_min
+      variable: T_compressor_inlet
+      direction: min                     # Constraint: T >= threshold
+      threshold: 32.2
+      initial_multiplier: 0.1
+      description: "Compressor inlet must stay above CO₂ near-critical region"
+
+    - name: compressor_inlet_temp_max
+      variable: T_compressor_inlet
+      direction: max                     # Constraint: T <= threshold
+      threshold: 34.0
+      initial_multiplier: 0.1
+      description: "Compressor inlet efficiency bound"
+
+    - name: turbine_inlet_temp_min
+      variable: T_turbine_inlet
+      direction: min
+      threshold: 715.0
+      initial_multiplier: 0.1
+      description: "Minimum turbine inlet temperature for acceptable efficiency"
+
+    - name: high_pressure_max
+      variable: P_high
+      direction: max
+      threshold: 22.0
+      initial_multiplier: 0.1
+      description: "High-side pressure vessel/seal limit"
+
+    - name: surge_margin_main
+      variable: surge_margin_main
+      direction: min
+      threshold: 0.05
+      initial_multiplier: 0.5           # Higher initial: surge is immediate danger
+      description: "Main compressor surge prevention (RULE-P4)"
+
+    - name: surge_margin_recomp
+      variable: surge_margin_recomp
+      direction: min
+      threshold: 0.05
+      initial_multiplier: 0.5
+      description: "Recompressor surge prevention (RULE-P4)"
+
+  # Multiplier update parameters
+  multiplier_lr: 0.001                   # Learning rate for λ gradient ascent
+  multiplier_min: 0.0                    # Multipliers are non-negative
+  multiplier_max: 10.0                   # Cap to prevent runaway
+  constraint_tolerance: 0.01            # Violation smaller than this is considered satisfied
+  update_frequency_steps: 2048          # Update multipliers every rollout (same as n_steps)
+
+# ─── Deployment Safety Wrapper ────────────────────────────────────────────────
+# Applied on top of policy output at inference time — separate from training constraints
+deployment:
+  apply_rate_limiter: true
+  apply_constraint_projection: true     # QP projection onto safe action set
+  projection_solver: osqp
+  projection_warmstart: true            # Warm-start QP from previous solution
+  projection_max_iter: 100
+  projection_eps_abs: 1.0e-4

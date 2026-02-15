@@ -1,0 +1,112 @@
+# PhysicsNeMo FNO surrogate training configuration (Path B)
+# Read by: LatinHypercubeSampler, TrajectoryDataset, FNOSurrogate, SurrogateTrainingLoop
+
+# ─── Data Generation ─────────────────────────────────────────────────────────
+sampling:
+  method: latin_hypercube             # Latin Hypercube Sampling for space-filling
+  n_trajectories: 75_000              # Total trajectories (50K train, 12.5K val, 12.5K test)
+  trajectory_length_steps: 200        # Steps per trajectory (200 × 5s = 1000s simulated)
+  n_workers: 16                       # Parallel FMU instances for data collection
+  seed: 42
+  output_file: "artifacts/trajectories/fno_training.h5"
+  output_schema:
+    state_shape: "[N, 20, 200]"       # (trajectories, state_vars, time_steps)
+    action_shape: "[N, 5, 199]"       # (trajectories, actions, time_steps-1)
+    metadata_shape: "[N, 3]"          # (T_exhaust, mdot_exhaust, W_setpoint)
+
+  # Parameter ranges for LHS sampling (3 independent parameters)
+  parameter_ranges:
+    T_exhaust_c:
+      min: 200.0
+      max: 1200.0
+    mdot_exhaust_kg_s:
+      min: 10.0
+      max: 100.0
+    W_net_setpoint_mw:
+      min: 2.0
+      max: 12.0
+
+  # Random action perturbations during trajectory collection
+  action_perturbation:
+    type: random_walk                  # Smooth action trajectories, not white noise
+    step_std: 0.02                     # Per-step std deviation of action change
+    clip: 0.1                          # Max single-step change (respects rate limits)
+
+# ─── FNO Architecture ────────────────────────────────────────────────────────
+fno:
+  architecture: FNO1d                  # 1D FNO: maps (state, action) time-series → next states
+  modes: 16                            # Fourier modes retained (12–16 sufficient for thermal dynamics)
+  width: 64                            # Latent channel width
+  n_layers: 4                          # Number of Fourier layers
+  input_dim: 25                        # 20 state vars + 5 action vars
+  output_dim: 20                       # 20 next state vars
+  activation: gelu                     # GELU (smoother than ReLU for spectral ops)
+  padding: 8                           # Zero-padding to avoid spectral aliasing at boundaries
+
+# ─── Training ────────────────────────────────────────────────────────────────
+training:
+  framework: physicsnemo
+  optimizer: adam
+  lr: 1.0e-3
+  lr_schedule: cosine_annealing
+  lr_min: 1.0e-5
+  batch_size: 256
+  epochs: 200
+  validation_split: 0.10              # 10% validation, 10% test, 80% train (of 75K)
+  test_split: 0.10
+  early_stopping_patience: 20        # Stop if val loss doesn't improve for 20 epochs
+  checkpoint_dir: "artifacts/surrogate"
+  tensorboard_log: "artifacts/logs/surrogate"
+  seed: 42
+
+  loss:
+    type: mse                          # Mean squared error on normalized states
+    normalize_per_variable: true       # Normalize loss contribution per output variable
+
+# ─── Fidelity Gate ────────────────────────────────────────────────────────────
+# Gate 3 PASS requires ALL criteria to be met
+# Results saved to artifacts/surrogate/fidelity_report.json
+fidelity_gate:
+  max_rmse_normalized: 0.05           # 5% normalized RMSE across all 20 outputs
+  min_r2: 0.97                        # Minimum R² on held-out test set
+
+  # Extra-tight thresholds for safety-critical variables
+  critical_variables:
+    - name: T_compressor_inlet
+      max_rmse_c: 0.5                 # ±0.5°C near critical point (32.2°C target)
+      min_r2: 0.98
+    - name: surge_margin_main
+      max_rmse: 0.01
+      min_r2: 0.90
+    - name: surge_margin_recomp
+      max_rmse: 0.01
+      min_r2: 0.90
+    - name: T_turbine_inlet
+      max_rmse_c: 5.0                 # ±5°C at turbine inlet
+      min_r2: 0.97
+
+  # Fidelity gate evaluation procedure
+  evaluation:
+    n_test_trajectories: 7500          # 10% of 75K
+    evaluation_mode: rollout           # Autoregressive rollout (not teacher-forced)
+    rollout_steps: 200
+    compare_against: real_fmu          # Gold-source comparison
+
+# ─── SKRL PPO on Surrogate ───────────────────────────────────────────────────
+skrl_ppo:
+  n_envs: 1024                        # Vectorized GPU environments
+  rollout_steps: 2048
+  learning_epochs: 10
+  mini_batches: 8
+  discount_factor: 0.99
+  lambda_gae: 0.95
+  policy_learning_rate: 3.0e-4
+  value_learning_rate: 3.0e-4
+  clip_param: 0.2
+  entropy_loss_scale: 0.01
+  value_loss_scale: 0.5
+  grad_norm_clip: 0.5
+  total_timesteps: 5_000_000
+  checkpoint_dir: "artifacts/checkpoints/surrogate_ppo"
+  tensorboard_log: "artifacts/logs/surrogate_ppo"
+  seed: 42

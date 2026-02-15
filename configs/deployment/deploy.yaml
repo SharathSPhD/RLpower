@@ -1,0 +1,85 @@
+# Policy export and deployment configuration (Stage 5)
+# Read by: ONNXExporter, TensorRTExporter, PolicyInferenceServer
+
+export:
+  input_checkpoint: "artifacts/checkpoints/finetuned/best_model"
+  output_dir: "artifacts/policies"
+  policy_name: "sco2_rl_policy"
+
+# ─── ONNX Export ─────────────────────────────────────────────────────────────
+onnx:
+  opset_version: 17
+  export_params: true
+  do_constant_folding: true
+  dynamic_axes:
+    input:
+      0: "batch_size"
+    output:
+      0: "batch_size"
+  # Verification against PyTorch reference
+  verify:
+    enabled: true
+    tolerance_abs: 1.0e-4              # Gate 5 PASS criterion: < 1e-4
+    n_test_samples: 1000
+    seed: 42
+
+# ─── TensorRT Export ─────────────────────────────────────────────────────────
+tensorrt:
+  # RULE: Always FP16 — FP32 violates latency SLA (Never-Do #6)
+  precision: fp16
+  workspace_gb: 4
+  min_batch: 1
+  opt_batch: 1
+  max_batch: 8
+  # Selective FP32 fallback for numerically sensitive layers
+  # (identified only if TRT FP16 output tolerance check fails)
+  fp32_layers: []                      # Empty by default; filled if needed
+
+  # Builder optimization level (0–5, higher = more optimization, slower build)
+  builder_optimization_level: 3
+
+  # Verification against ONNX reference
+  verify:
+    enabled: true
+    tolerance_abs: 1.0e-2              # FP16 acceptable tolerance (vs 1e-4 for ONNX)
+    n_test_samples: 1000
+    seed: 42
+
+# ─── Inference Latency SLA ────────────────────────────────────────────────────
+inference:
+  # Gate 5 PASS criteria: p99 < 1ms
+  max_latency_ms: 1.0                  # Hard SLA (p99)
+  target_latency_ms: 0.5              # Design target (mean)
+  benchmark:
+    n_warmup: 100                      # Warmup iterations before measurement
+    n_iterations: 10000                # Measurement iterations
+    batch_size: 1                      # Plant-edge: single-sample inference
+    output_file: "artifacts/policies/latency_report.json"
+
+# ─── Safety Wrapper (Deployment) ─────────────────────────────────────────────
+# Applied on top of TRT policy at inference time
+safety_wrapper:
+  apply_rate_limiter: true             # Enforce per-step rate limits (always)
+  apply_constraint_projection: true    # QP projection onto safe action set
+  projection_solver: osqp
+  projection_warmstart: true
+  projection_max_iter: 100
+  projection_eps_abs: 1.0e-4
+  # Action space bounds enforced by projection
+  action_bounds_config: "configs/environment/env.yaml"  # Read rate limits from here
+
+# ─── Evaluation Report ────────────────────────────────────────────────────────
+evaluation:
+  n_episodes_per_phase: 50             # Episodes evaluated per curriculum phase
+  curriculum_phases: [0, 1, 2, 3, 4, 5, 6]   # All 7 phases
+  baseline_comparison: pid             # Compare against PID baseline
+  output_file: "artifacts/policies/evaluation_report.json"
+  metrics:
+    - mean_episode_reward
+    - mean_tracking_error_mw
+    - mean_thermal_efficiency
+    - constraint_violation_rate
+    - compressor_inlet_temp_min_c      # Safety margin check
+    - surge_margin_main_min
+    - surge_margin_recomp_min
+    - episode_completion_rate          # Fraction of episodes without solver failure

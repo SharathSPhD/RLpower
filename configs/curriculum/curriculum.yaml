@@ -1,0 +1,178 @@
+# Curriculum learning configuration — 7 progressive training scenarios
+# Read by: CurriculumManager, ScenarioFactory, FMUDirectTrainer, SurrogateTrainer
+
+# ─── Advancement Policy ───────────────────────────────────────────────────────
+advancement:
+  window_episodes: 50                   # Rolling window for mean reward computation
+  require_zero_constraint_violations: true   # Must have 0 violations over window
+  check_frequency_episodes: 10          # Evaluate advancement every N episodes
+  allow_regression: false               # CurriculumPhase state machine: no backward transitions
+
+# ─── Phase Definitions ────────────────────────────────────────────────────────
+phases:
+  - id: 0
+    name: steady_state_optimization
+    description: >
+      Fixed heat source (550°C), no load changes, no disturbances.
+      Agent learns to maximize thermal efficiency at design operating point.
+      Simplest scenario — establishes baseline control authority.
+    scenario_ids: [0]
+    advancement_threshold: 8.0          # Mean reward over 50 episodes
+    episode_length_steps: 120           # 120 × 5s = 10 minutes simulated
+    heat_source:
+      type: constant
+      T_exhaust_c: 550.0
+      mdot_exhaust_kg_s: 45.0
+    setpoint:
+      type: constant
+      W_net_mw: 10.0
+    disturbance: null
+    initial_conditions: warm            # Start at design point (not cold)
+
+  - id: 1
+    name: gradual_load_following
+    description: >
+      ±30% load changes as smooth ramps over 10-minute periods.
+      Agent learns to coordinate bypass valve (fast response) with
+      inventory valve (efficient steady state) for tracking accuracy.
+    scenario_ids: [1]
+    advancement_threshold: 6.0
+    episode_length_steps: 360           # 30 minutes simulated
+    heat_source:
+      type: constant
+      T_exhaust_c: 550.0
+      mdot_exhaust_kg_s: 45.0
+    setpoint:
+      type: ramp_sinusoid
+      W_net_base_mw: 10.0
+      amplitude_fraction: 0.30          # ±30% of rated
+      ramp_duration_s: 600.0
+    disturbance: null
+    initial_conditions: warm
+
+  - id: 2
+    name: ambient_temperature_disturbance
+    description: >
+      Cooling water temperature varies ±10°C as slow sinusoid (30-minute period).
+      Tests adaptive response to compressor inlet temperature drift.
+      Asymmetric CO₂ nonlinearity makes this non-trivial.
+    scenario_ids: [2]
+    advancement_threshold: 5.5
+    episode_length_steps: 720           # 60 minutes simulated
+    heat_source:
+      type: constant
+      T_exhaust_c: 550.0
+      mdot_exhaust_kg_s: 45.0
+    setpoint:
+      type: constant
+      W_net_mw: 10.0
+    disturbance:
+      type: ambient_temperature
+      T_coolant_nominal_c: 25.0
+      amplitude_c: 10.0
+      period_s: 1800.0
+    initial_conditions: warm
+
+  - id: 3
+    name: eaf_heat_transients
+    description: >
+      EAF exhaust cycles 200°C → 1200°C over 15-minute rise, holds 30 min, drops in 5 min.
+      The defining challenge of this project — requires thermal energy storage management.
+      Agent must anticipate the drop and pre-position valves.
+    scenario_ids: [3]
+    advancement_threshold: 4.0
+    episode_length_steps: 1080          # 90 minutes simulated
+    heat_source:
+      type: eaf_cycle
+      T_min_c: 200.0
+      T_max_c: 1200.0
+      rise_duration_s: 900.0            # 15 minutes
+      hold_duration_s: 1800.0           # 30 minutes
+      drop_duration_s: 300.0            # 5 minutes (sharp!)
+      mdot_exhaust_kg_s: 45.0
+    setpoint:
+      type: proportional_to_heat_source  # Setpoint tracks available heat
+      max_W_net_mw: 10.0
+      min_W_net_mw: 2.0
+    disturbance: null
+    initial_conditions: warm
+
+  - id: 4
+    name: rapid_load_rejection
+    description: >
+      50% load drop in 30 seconds — simulates sudden grid disconnection.
+      Agent must prevent surge (bypass valve fast response) and
+      frequency deviation (≤ 0.02 Hz grid requirement).
+    scenario_ids: [4]
+    advancement_threshold: 3.0
+    episode_length_steps: 360           # 30 minutes (event at step 60)
+    heat_source:
+      type: constant
+      T_exhaust_c: 550.0
+      mdot_exhaust_kg_s: 45.0
+    setpoint:
+      type: step
+      W_net_pre_mw: 10.0
+      W_net_post_mw: 5.0
+      step_time_s: 300.0               # Event at 5 minutes into episode
+      step_duration_s: 30.0            # 30-second ramp down
+    disturbance: null
+    initial_conditions: warm
+    success_metric:
+      surge_margin_maintained: true
+      frequency_deviation_max_hz: 0.02
+
+  - id: 5
+    name: cold_startup_sequence
+    description: >
+      Full cold startup from low pressure, ramping through CO₂ critical region.
+      Hardest steady-state scenario. CO₂ at critical point has extreme property
+      sensitivity — small temperature errors cause solver divergence.
+    scenario_ids: [5]
+    advancement_threshold: 2.0
+    episode_length_steps: 720           # 60 minutes simulated
+    heat_source:
+      type: ramp
+      T_start_c: 200.0
+      T_end_c: 750.0
+      ramp_duration_s: 1800.0
+      mdot_exhaust_kg_s: 45.0
+    setpoint:
+      type: ramp
+      W_net_start_mw: 0.0
+      W_net_end_mw: 10.0
+      ramp_duration_s: 2400.0
+    disturbance: null
+    initial_conditions: cold            # Cold start: low pressure, ambient temperature
+    critical_zone_handling:
+      monitor_closely: true
+      T_compressor_inlet_target_c: 32.5  # Must maintain during startup ramp
+
+  - id: 6
+    name: emergency_turbine_trip
+    description: >
+      Turbine trip from rated power — simulates turbine protective relay actuation.
+      Agent must isolate turbine, manage bypass valve, and prevent thermal shock
+      (maintain ≤ 2°C/min temperature change rate at turbine).
+      Hardest scenario — tests all control authorities simultaneously.
+    scenario_ids: [6]
+    advancement_threshold: 1.0
+    episode_length_steps: 360           # 30 minutes
+    heat_source:
+      type: constant
+      T_exhaust_c: 700.0               # High temperature at time of trip
+      mdot_exhaust_kg_s: 45.0
+    setpoint:
+      type: step
+      W_net_pre_mw: 10.0
+      W_net_post_mw: 0.0
+      step_time_s: 120.0               # Trip at 2 minutes into episode
+      step_duration_s: 0.1             # Near-instantaneous
+    disturbance:
+      type: component_trip
+      component: turbine
+      trip_mode: isolation             # Close inlet/outlet valves
+    initial_conditions: warm
+    success_metric:
+      turbine_temp_rate_max_c_per_min: 2.0   # Thermal shock prevention
+      avoid_thermal_shock: true

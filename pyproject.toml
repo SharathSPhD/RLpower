@@ -1,0 +1,152 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sco2rl"
+version = "0.1.0"
+description = "Deep RL for autonomous control of sCO₂ recompression Brayton cycle"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+readme = "README.md"
+
+# Core dependencies (always installed)
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+# Physics layer (Stage 0)
+physics = [
+    "OMPython>=3.5",
+    "fmpy>=0.3.20",
+    "jinja2>=3.1",
+    "lxml>=5.0",
+]
+
+# RL training - FMU direct path (Stage 1-2)
+rl-fmu = [
+    "gymnasium>=0.29",
+    "stable-baselines3>=2.3",
+    "torch>=2.2",
+    "tensorboard>=2.15",
+    "osqp>=0.6",
+]
+
+# Surrogate training - GPU path (Stage 3)
+surrogate = [
+    "h5py>=3.10",
+    "nvidia-modulus>=0.6",   # PhysicsNeMo
+    "skrl>=1.2",
+    "torch>=2.2",
+]
+
+# Deployment (Stage 5)
+deploy = [
+    "onnx>=1.16",
+    "onnxruntime>=1.18",
+    # tensorrt: installed via Docker (nvcr.io/nvidia/pytorch:24.11-py3 base image)
+]
+
+# All production dependencies
+all = [
+    "sco2rl[physics]",
+    "sco2rl[rl-fmu]",
+    "sco2rl[surrogate]",
+    "sco2rl[deploy]",
+]
+
+# Development + testing
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-xdist>=3.5",           # Parallel test execution
+    "hypothesis>=6.100",           # Property-based testing
+    "pytest-mock>=3.12",
+    "ruff>=0.4",                   # Linting + formatting
+    "mypy>=1.9",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+sco2-build-fmu = "sco2rl.scripts.build_fmu:main"
+sco2-train-fmu = "sco2rl.scripts.train_fmu:main"
+sco2-train-surrogate = "sco2rl.scripts.train_surrogate:main"
+sco2-collect-trajectories = "sco2rl.scripts.collect_trajectories:main"
+sco2-finetune = "sco2rl.scripts.finetune_fmu:main"
+sco2-export = "sco2rl.scripts.export_policy:main"
+sco2-verify = "sco2rl.scripts.verify_environment:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sco2rl"]
+
+[tool.hatch.envs.default]
+dependencies = [
+    "sco2rl[dev]",
+]
+
+# ─── Pytest Configuration ──────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--cov=src/sco2rl",
+    "--cov-report=term-missing",
+    "--cov-fail-under=85",
+]
+markers = [
+    "integration: requires --run-integration flag and compiled FMU at artifacts/fmu/SCO2_WHR.fmu",
+    "slow: tests that take > 60 seconds",
+    "gpu: tests that require CUDA GPU",
+]
+# Integration tests disabled by default (require real FMU)
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:gymnasium",
+    "ignore::UserWarning:stable_baselines3",
+]
+
+# ─── Ruff (Linting + Formatting) ──────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "N",    # pep8-naming
+]
+ignore = [
+    "E501",  # Line too long (handled by formatter)
+    "B008",  # Function call in default argument (common in pydantic)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sco2rl"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ─── Mypy (Type Checking) ──────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+strict = false                   # Not strict — physics code has complex types
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true    # Many scientific libs lack stubs
+packages = ["sco2rl"]

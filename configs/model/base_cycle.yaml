@@ -1,0 +1,142 @@
+# Modelica topology configuration for the sCO₂ recompression Brayton cycle
+# This YAML is the input to SCO2CycleBuilder — no hand-authored .mo files.
+
+cycle:
+  name: SCO2_WHR
+  package: SCO2RecompressionCycle
+  libraries:
+    - Modelica
+    - ThermoPower
+    - SCOPE
+    - ExternalMedia
+
+# Design-point operating parameters
+parameters:
+  net_power_mwe: 10.0
+  design_turbine_inlet_temp_c: 750.0
+  design_turbine_inlet_pressure_mpa: 20.0
+  design_compressor_inlet_temp_c: 32.5     # 1.4°C above critical point
+  design_compressor_inlet_pressure_mpa: 7.5
+  design_mass_flow_kg_s: 125.0
+  recompression_split_ratio: 0.35
+  design_thermal_efficiency: 0.47
+
+# CO₂ fluid properties — used by ExternalMedia/CoolProp
+fluid:
+  medium: "ExternalMedia.Media.CoolPropMedium"
+  coolprop_name: "CarbonDioxide"
+  coolprop_options: "enable_BICUBIC=1"     # RULE-P3: mandatory
+  critical_temp_c: 31.1
+  critical_pressure_mpa: 7.38
+  # Asymmetric nonlinearity near critical point:
+  # 1.5°C drop below design → 6% more cooling power needed
+  # 1.5°C rise above design → 18% less cooling power needed
+
+# Component specifications
+# ComponentFactory reads these to create typed component dataclasses
+components:
+  main_compressor:
+    type: SCOPE.Compressors.CentrifugalCompressor
+    params:
+      eta_design: 0.89
+      N_design_rpm: 3600
+      beta_ratio_design: 3.2
+      inlet_volume_flow_m3_s: 0.85
+
+  recompressor:
+    type: SCOPE.Compressors.CentrifugalCompressor
+    params:
+      eta_design: 0.87
+      N_design_rpm: 3600
+      beta_ratio_design: 3.0
+      inlet_volume_flow_m3_s: 0.30
+
+  turbine:
+    type: SCOPE.Turbines.AxialTurbine
+    params:
+      eta_design: 0.93
+      N_design_rpm: 3600
+      expansion_ratio_design: 2.8
+
+  recuperator_high_temp:
+    type: ThermoPower.Gas.HE
+    params:
+      UA_design: 850.0       # kW/K
+      effectiveness_design: 0.95
+      pressure_drop_hot_kpa: 50.0
+      pressure_drop_cold_kpa: 80.0
+
+  recuperator_low_temp:
+    type: ThermoPower.Gas.HE
+    params:
+      UA_design: 650.0
+      effectiveness_design: 0.93
+      pressure_drop_hot_kpa: 40.0
+      pressure_drop_cold_kpa: 60.0
+
+  precooler:
+    type: ThermoPower.Gas.HE
+    params:
+      UA_design: 400.0
+      T_coolant_inlet_c: 25.0
+      mdot_coolant_design_kg_s: 85.0
+
+  heat_source:
+    type: SCOPE.HeatSources.ExhaustHeatSource
+    params:
+      T_exhaust_min_c: 200.0
+      T_exhaust_max_c: 1200.0
+      mdot_exhaust_design_kg_s: 45.0
+
+  # Actuators (5-dimensional action space)
+  bypass_valve:
+    type: ThermoPower.Water.ValveLin
+    params:
+      Cv_design: 120.0
+      opening_min: 0.0
+      opening_max: 1.0
+
+  igv:
+    type: SCOPE.Actuators.InletGuideVane
+    params:
+      angle_min_deg: -30.0
+      angle_max_deg: 15.0
+      design_angle_deg: 0.0
+
+  inventory_valve:
+    type: ThermoPower.Water.ValveLin
+    params:
+      Cv_design: 45.0
+      opening_min: 0.0
+      opening_max: 1.0
+
+  cooling_valve:
+    type: ThermoPower.Water.ValveLin
+    params:
+      Cv_design: 95.0
+      cooling_flow_min_fraction: 0.50   # 50% of design
+      cooling_flow_max_fraction: 1.50   # 150% of design
+
+  split_valve:
+    type: ThermoPower.Water.SplitValve
+    params:
+      split_ratio_min: 0.15
+      split_ratio_max: 0.55
+
+# Topology: defined procedurally in SCO2CycleBuilder.build()
+# This section documents the intended flow path for reference/validation
+topology:
+  type: recompression_brayton
+  flow_path:
+    - main_compressor.outlet -> split_valve.inlet
+    - split_valve.outlet_a -> recuperator_low_temp.cold_in
+    - split_valve.outlet_b -> recompressor.inlet
+    - recuperator_low_temp.cold_out -> recuperator_high_temp.cold_in
+    - recompressor.outlet -> recuperator_high_temp.cold_in   # mixing point
+    - recuperator_high_temp.cold_out -> heat_source.cold_in
+    - heat_source.cold_out -> turbine.inlet
+    - turbine.outlet -> recuperator_high_temp.hot_in
+    - recuperator_high_temp.hot_out -> recuperator_low_temp.hot_in
+    - recuperator_low_temp.hot_out -> precooler.hot_in
+    - precooler.hot_out -> main_compressor.inlet
+    - bypass_valve connects: turbine.outlet -> precooler.hot_in  # bypass path
