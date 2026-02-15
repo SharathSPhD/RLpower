@@ -5,6 +5,9 @@ CLAUDE.md
 MEMORY.md
 RULES.md
 SPEC.md
+# ─── Git Worktrees ────────────────────────────────────────────────────────────
+.worktrees/
+
 # ─── Generated Artifacts (never commit) ──────────────────────────────────────
 # RULE: Never commit artifacts/ (platform-specific binaries — RULES.md #7)
 artifacts/

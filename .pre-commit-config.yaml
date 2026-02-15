@@ -1,0 +1,45 @@
+repos:
+  # Python linting and formatting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+        types: [python]
+      - id: ruff-format
+        types: [python]
+
+  # Block committing artifacts/ (RULES.md Never-Do #7)
+  - repo: local
+    hooks:
+      - id: no-artifacts
+        name: Block artifacts/ from commit
+        language: system
+        entry: bash -c 'if git diff --cached --name-only | grep -q "^artifacts/"; then echo "ERROR: Cannot commit artifacts/ — RULE-D1 violation. Run: git reset HEAD artifacts/"; exit 1; fi'
+        pass_filenames: false
+        always_run: true
+
+      - id: no-fmu-binaries
+        name: Block FMU binary files
+        language: system
+        entry: bash -c 'if git diff --cached --name-only | grep -qE "\.(fmu|so|dll|dylib|h5|hdf5)$"; then echo "ERROR: Binary/generated files cannot be committed. Remove from staging."; exit 1; fi'
+        pass_filenames: false
+        always_run: true
+
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: "^docs/"
+      - id: end-of-file-fixer
+        exclude: "^docs/"
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]         # Block files > 500KB
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, main]      # Force feature branches (except initial setup)
