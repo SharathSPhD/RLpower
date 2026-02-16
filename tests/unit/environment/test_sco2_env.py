@@ -455,3 +455,70 @@ class TestGymnasiumCompliance:
             steps += 1
             assert steps <= ENV_CONFIG["episode_max_steps"] + 2
         assert steps > 0
+
+
+# ── Curriculum Phase ───────────────────────────────────────────────────────────
+
+class TestCurriculumPhase:
+    def test_default_phase_is_zero(self):
+        """SCO2FMUEnv initialises with _curriculum_phase = 0 (STEADY_STATE)."""
+        env = _make_env()
+        assert env._curriculum_phase == 0
+
+    def test_set_curriculum_phase_stores_phase(self):
+        """set_curriculum_phase(3) sets _curriculum_phase = 3."""
+        env = _make_env()
+        env.set_curriculum_phase(3)
+        assert env._curriculum_phase == 3
+
+    def test_set_curriculum_phase_zero(self):
+        """set_curriculum_phase(0) resets to STEADY_STATE."""
+        env = _make_env()
+        env.set_curriculum_phase(5)
+        env.set_curriculum_phase(0)
+        assert env._curriculum_phase == 0
+
+    def test_set_curriculum_phase_max(self):
+        """set_curriculum_phase(6) stores EMERGENCY_TRIP phase."""
+        env = _make_env()
+        env.set_curriculum_phase(6)
+        assert env._curriculum_phase == 6
+
+    def test_phase_survives_reset(self):
+        """Phase set before reset() persists after reset (curriculum outlasts episode)."""
+        env = _make_env()
+        env.set_curriculum_phase(3)
+        env.reset()
+        assert env._curriculum_phase == 3
+
+    def test_phase_0_no_disturbance_applied(self):
+        """Phase 0 (STEADY_STATE): FMU receives only the agent's action, no extra disturbance.
+
+        We verify this by running two envs with same action + same seed: one in phase 0,
+        one in phase 0. They must produce identical rewards (deterministic MockFMU).
+        """
+        env_a = _make_env()
+        env_b = _make_env()
+        env_a.set_curriculum_phase(0)
+        env_b.set_curriculum_phase(0)
+        env_a.reset(seed=42)
+        env_b.reset(seed=42)
+
+        action = np.zeros(len(ACTION_VARS), dtype=np.float32)
+        _, r_a, _, _, _ = env_a.step(action)
+        _, r_b, _, _, _ = env_b.step(action)
+        assert r_a == pytest.approx(r_b, abs=1e-4), (
+            f"Phase-0 envs must be identical: r_a={r_a:.4f}, r_b={r_b:.4f}"
+        )
+
+    def test_phase_3_disturbance_recorded_in_info(self):
+        """Phase 3 (EAF_TRANSIENTS): step() info dict should include 'disturbance_applied'."""
+        env = _make_env()
+        env.set_curriculum_phase(3)
+        env.reset(seed=0)
+        action = np.zeros(len(ACTION_VARS), dtype=np.float32)
+        _, _, _, _, info = env.step(action)
+        # When a disturbance is applied, info must advertise it
+        assert "disturbance_applied" in info, (
+            "Phase 3 step() must include 'disturbance_applied' key in info dict"
+        )

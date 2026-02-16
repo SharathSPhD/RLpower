@@ -5,21 +5,29 @@ Wires together:
   VecNormalize
   LagrangianPPO
   CheckpointManager
+  CurriculumCallback (wires MetricsObserver + CurriculumScheduler into training)
 
 Unit tests use MockFMU; integration tests use FMPyAdapter with real FMU.
-RULE-C1: FMUInterface is injected via setup() -- no direct FMU construction here.
+RULE-C1: FMUInterface is injected via fmu_factory callable -- no direct FMU construction.
+
+ADR: setup(fmu_factory: Callable[[], FMUInterface], n_envs: int) creates one FMU
+instance per VecEnv worker via the factory, enabling SubprocVecEnv parallelism.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from sco2rl.environment.sco2_env import SCO2FMUEnv
 from sco2rl.simulation.fmu.interface import FMUInterface
 from sco2rl.training.lagrangian_ppo import LagrangianPPO
 from sco2rl.training.checkpoint_manager import CheckpointManager
+from sco2rl.training.curriculum_callback import CurriculumCallback
+from sco2rl.curriculum.scheduler import CurriculumScheduler
+from sco2rl.curriculum.metrics_observer import MetricsObserver
+from sco2rl.curriculum.phase import CurriculumPhase, PhaseConfig
 
 
 class FMUTrainer:
@@ -39,17 +47,27 @@ class FMUTrainer:
         self._env: VecNormalize | None = None
         self._policy: LagrangianPPO | None = None
         self._checkpoint_mgr: CheckpointManager | None = None
-        self._fmu: FMUInterface | None = None
+        self._curriculum_callback: CurriculumCallback | None = None
 
-    def setup(self, fmu: FMUInterface) -> None:
-        """Wire up environment, policy, and checkpoint manager.
+    def setup(
+        self,
+        fmu_factory: Callable[[], FMUInterface],
+        n_envs: int = 1,
+    ) -> None:
+        """Wire up environment, policy, curriculum callback, and checkpoint manager.
 
         Parameters
         ----------
-        fmu:
-            Injected FMUInterface (MockFMU for unit tests, FMPyAdapter for prod).
+        fmu_factory:
+            Callable that returns a new FMUInterface instance. Called once per
+            VecEnv worker so each process gets its own independent FMU.
+        n_envs:
+            Number of parallel FMU environments. n_envs=1 uses DummyVecEnv
+            (synchronous, no subprocess overhead — good for unit tests).
+            n_envs>1 uses DummyVecEnv with n_envs workers (production should
+            use SubprocVecEnv via the scripts/train_fmu.py entry point which
+            sets start_method="spawn" for CUDA-safe multiprocessing).
         """
-        self._fmu = fmu
         cfg = self._config
 
         # Build env config from training config dict
@@ -66,11 +84,14 @@ class FMUTrainer:
             "setpoint": cfg.get("setpoint", {}),
         }
 
-        # Wrap in DummyVecEnv (single env for unit tests; SubprocVecEnv for prod)
-        def make_env():
-            return SCO2FMUEnv(fmu=fmu, config=env_config)
+        # Build list of env factory functions (one per worker)
+        def make_single_env():
+            return SCO2FMUEnv(fmu=fmu_factory(), config=env_config)
 
-        vec_env = DummyVecEnv([make_env])
+        env_fns = [make_single_env for _ in range(n_envs)]
+
+        # DummyVecEnv for unit tests; production uses SubprocVecEnv externally
+        vec_env = DummyVecEnv(env_fns)
 
         # VecNormalize for observation and reward normalisation
         norm_cfg = cfg.get("normalization", {})
@@ -117,6 +138,29 @@ class FMUTrainer:
             run_name=run_name,
         )
 
+        # CurriculumCallback: wires MetricsObserver + CurriculumScheduler into learn()
+        curriculum_cfg = cfg.get("curriculum", {})
+        observer_cfg = {
+            "window_size": curriculum_cfg.get("window_size", 50),
+            "advance_threshold": curriculum_cfg.get("advance_threshold", 0.8),
+            "violation_rate_limit": curriculum_cfg.get("violation_rate_limit", 0.05),
+            "min_episodes": curriculum_cfg.get("min_episodes", 50),
+        }
+        observer = MetricsObserver(config=observer_cfg)
+
+        phase_configs = self._build_default_phase_configs(curriculum_cfg)
+        scheduler = CurriculumScheduler(phase_configs=phase_configs, observer=observer)
+
+        checkpoint_freq = cfg.get("checkpoint_freq", 100_000)
+        self._curriculum_callback = CurriculumCallback(
+            scheduler=scheduler,
+            observer=observer,
+            checkpoint_mgr=self._checkpoint_mgr,
+            checkpoint_freq=checkpoint_freq,
+            vecnorm=self._env,
+            verbose=cfg.get("verbose", 0),
+        )
+
     def train(self, total_timesteps: int) -> LagrangianPPO:
         """Main training loop with curriculum and checkpointing.
 
@@ -126,19 +170,19 @@ class FMUTrainer:
         if self._policy is None or self._env is None:
             raise RuntimeError("Call setup() before train().")
 
-        checkpoint_freq = self._config.get("checkpoint_freq", 100_000)
-        curriculum_phase = self._config.get("initial_curriculum_phase", 0)
-
-        self._policy.learn(total_timesteps=total_timesteps)
+        # Pass CurriculumCallback to learn() so curriculum advances during training
+        self._policy.learn(
+            total_timesteps=total_timesteps,
+            callback=self._curriculum_callback,
+        )
 
         # Save final checkpoint
+        final_phase = int(self._curriculum_callback.scheduler.get_phase())
         self._checkpoint_mgr.save(
             model=self._policy,
-            vecnorm_stats=self._env.get_attr("obs_rms", indices=[0]),
-            curriculum_phase=curriculum_phase,
-            lagrange_multipliers=self._policy.get_multipliers(),
+            vecnorm=self._env,
+            curriculum_phase=final_phase,
             total_timesteps=self._policy.num_timesteps,
-            step=self._policy.num_timesteps,
         )
 
         return self._policy
@@ -189,3 +233,36 @@ class FMUTrainer:
             "mean_reward": mean_reward,
             "violation_rate": violation_rate,
         }
+
+    # -- Internal ---------------------------------------------------------------
+
+    @staticmethod
+    def _build_default_phase_configs(curriculum_cfg: dict) -> list[PhaseConfig]:
+        """Build default PhaseConfig list for all 7 curriculum phases.
+
+        Uses per-phase thresholds matching curriculum.yaml if present,
+        otherwise applies sensible defaults. One PhaseConfig per CurriculumPhase.
+        """
+        phases_from_cfg = curriculum_cfg.get("phases", [])
+        defaults = [
+            # phase,                           thresh,  min_ep, window, viol_lim, ampl
+            (CurriculumPhase.STEADY_STATE,      0.85,     50,     50,   0.02, 0.0),
+            (CurriculumPhase.LOAD_FOLLOW,       0.80,     50,     50,   0.05, 0.3),
+            (CurriculumPhase.AMBIENT_TEMP,      0.75,     50,     50,   0.05, 10.0),
+            (CurriculumPhase.EAF_TRANSIENTS,    0.70,     50,     50,   0.10, 200.0),
+            (CurriculumPhase.LOAD_REJECTION,    0.65,     50,     50,   0.10, 0.5),
+            (CurriculumPhase.COLD_STARTUP,      0.60,     50,     50,   0.15, 300.0),
+            (CurriculumPhase.EMERGENCY_TRIP,    0.55,     50,     50,   0.20, 400.0),
+        ]
+        configs = []
+        for i, (phase, thresh, min_ep, window, viol_lim, ampl) in enumerate(defaults):
+            override = phases_from_cfg[i] if i < len(phases_from_cfg) else {}
+            configs.append(PhaseConfig(
+                phase=phase,
+                advance_threshold=override.get("advance_threshold", thresh),
+                min_episodes=override.get("min_episodes", min_ep),
+                window_size=override.get("window_size", window),
+                violation_rate_limit=override.get("violation_rate_limit", viol_lim),
+                disturbance_amplitude=override.get("disturbance_amplitude", ampl),
+            ))
+        return configs

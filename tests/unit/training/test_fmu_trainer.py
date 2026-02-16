@@ -81,6 +81,20 @@ TRAINER_CONFIG = {
 
 # ---- Fixtures ---------------------------------------------------------------
 
+def _make_fmu_factory(seed: int = 42):
+    """Return a factory function that creates a MockFMU (for SubprocVecEnv compatibility)."""
+    def factory():
+        fmu = MockFMU(
+            obs_vars=OBS_VARS,
+            action_vars=ACTION_VARS,
+            design_point=DESIGN_POINT,
+            seed=seed,
+        )
+        fmu.initialize(start_time=0.0, stop_time=1000.0, step_size=5.0)
+        return fmu
+    return factory
+
+
 @pytest.fixture
 def mock_fmu():
     fmu = MockFMU(
@@ -100,17 +114,18 @@ def trainer():
 
 
 @pytest.fixture
-def trainer_setup(trainer, mock_fmu):
-    trainer.setup(fmu=mock_fmu)
+def trainer_setup(trainer):
+    """Set up trainer with factory-based API (new interface)."""
+    trainer.setup(fmu_factory=_make_fmu_factory(), n_envs=1)
     return trainer
 
 
 # ---- Tests ------------------------------------------------------------------
 
 class TestFMUTrainerSetup:
-    def test_setup_completes_without_error(self, trainer, mock_fmu):
-        """setup(mock_fmu) should complete without raising."""
-        trainer.setup(fmu=mock_fmu)
+    def test_setup_with_factory_completes_without_error(self, trainer):
+        """setup(fmu_factory=..., n_envs=1) should complete without raising."""
+        trainer.setup(fmu_factory=_make_fmu_factory(), n_envs=1)
 
     def test_setup_creates_policy(self, trainer_setup):
         assert trainer_setup._policy is not None
@@ -128,6 +143,29 @@ class TestFMUTrainerSetup:
     def test_evaluate_before_setup_raises(self, trainer):
         with pytest.raises(RuntimeError, match="setup"):
             trainer.evaluate(n_episodes=1)
+
+    def test_setup_creates_curriculum_callback(self, trainer_setup):
+        """setup() must create a CurriculumCallback (no longer dead code)."""
+        assert trainer_setup._curriculum_callback is not None
+
+    def test_setup_factory_called_n_envs_times(self, trainer):
+        """setup(fmu_factory, n_envs=2) calls factory twice (DummyVecEnv with 2 envs)."""
+        call_count = {"n": 0}
+
+        def counting_factory():
+            call_count["n"] += 1
+            fmu = MockFMU(
+                obs_vars=OBS_VARS,
+                action_vars=ACTION_VARS,
+                design_point=DESIGN_POINT,
+                seed=0,
+            )
+            fmu.initialize(start_time=0.0, stop_time=1000.0, step_size=5.0)
+            return fmu
+
+        trainer.setup(fmu_factory=counting_factory, n_envs=2)
+        # DummyVecEnv calls factory once per env
+        assert call_count["n"] == 2
 
 
 class TestFMUTrainerEvaluate:
