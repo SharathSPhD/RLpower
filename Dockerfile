@@ -89,6 +89,109 @@ RUN mkdir -p /opt/libs && \
         https://github.com/sxwd4ever/UQSTEPS_modelica.git \
         /opt/libs/SCOPE
 
+# ── SCOPE Modelica 4.x compatibility patches (ARM64, OMC 1.26+) ─────────────
+# SCOPE was written for Modelica 3.2.1. Patch for Modelica 4.1.0 / OMC 1.26.2.
+# 1. Bulk replace Modelica.SIunits namespace → Modelica.Units.SI
+# 2. DataRecord.R → DataRecord.R_s (renamed in MSL 4.x)
+# 3. Remove fixedX/reducedX from IdealGas (removed from MSL 4.x interface)
+# 4. Rewrite Valve.mo (used undeclared medium_in/out.state)
+# 5. Rewrite BaseExchanger.mo / Recuperator.mo to use PropsSI (not ExternalMedia C)
+# 6. Build libMyProps.so (SCOPE's CoolProp wrapper) from stub C for ARM64
+RUN SCOPE=/opt/libs/SCOPE/src/Modelica/Steps && \
+    # --- 1. Namespace bulk replace ---
+    find ${SCOPE} -name '*.mo' -exec \
+        sed -i 's/Modelica\.SIunits\.Conversions/Modelica.Units.Conversions/g' {} + && \
+    find ${SCOPE} -name '*.mo' -exec \
+        sed -i 's/Modelica\.SIunits/Modelica.Units.SI/g' {} + && \
+    # --- 2. DataRecord.R → DataRecord.R_s ---
+    sed -i 's/\bR=188\.9244822140674\b/R_s=188.9244822140674/g' \
+        ${SCOPE}/Media/SCO2.mo ${SCOPE}/Media/CO2.mo && \
+    sed -i 's/\bdata\.R\b/data.R_s/g' ${SCOPE}/Media/CO2.mo && \
+    # --- 3. Remove deprecated IdealGas parameters ---
+    sed -i '/final fixedX = true,/d; /final reducedX = true,/d' \
+        ${SCOPE}/Media/SCO2.mo ${SCOPE}/Media/CO2.mo && \
+    echo "SCOPE Modelica 4.x namespace patches applied."
+
+# Rewrite Valve.mo — original used undeclared medium_in/out.state
+RUN cat > /opt/libs/SCOPE/src/Modelica/Steps/Components/Valve.mo << 'VALVE_EOF'
+within Steps.Components;
+model Valve "Isenthalpic throttle valve (pure fluid-port equations)"
+  extends TwoPorts;
+  parameter Modelica.Units.SI.AbsolutePressure p_outlet "Fixed outlet pressure";
+equation
+  outlet.m_flow + inlet.m_flow = 0;
+  outlet.h_outflow = inStream(inlet.h_outflow);
+  outlet.p = p_outlet;
+  inlet.h_outflow = inStream(outlet.h_outflow);
+end Valve;
+VALVE_EOF
+
+# Rewrite BaseExchanger.mo — remove PBMedia.BaseProperties that require ExternalMedia C
+RUN cat > /opt/libs/SCOPE/src/Modelica/Steps/Components/BaseExchanger.mo << 'BX_EOF'
+within Steps.Components;
+model BaseExchanger "Base class for heat exchangers (port-only, no ExternalMedia dependency)"
+  replaceable package PBMedia = Steps.Media.SCO2;
+  replaceable Steps.Interfaces.PBFluidPort_a inlet_hot(redeclare package Medium = PBMedia)
+    annotation(Placement(transformation(extent={{-110,40},{-90,60}})));
+  replaceable Steps.Interfaces.PBFluidPort_b outlet_hot(redeclare package Medium = PBMedia)
+    annotation(Placement(transformation(extent={{90,40},{110,60}})));
+  replaceable Steps.Interfaces.PBFluidPort_a inlet_cold(redeclare package Medium = PBMedia)
+    annotation(Placement(transformation(extent={{-110,-60},{-90,-40}})));
+  replaceable Steps.Interfaces.PBFluidPort_b outlet_cold(redeclare package Medium = PBMedia)
+    annotation(Placement(transformation(extent={{90,-60},{110,-40}})));
+  parameter Boolean debug_mode = false;
+end BaseExchanger;
+BX_EOF
+
+# Rewrite Recuperator.mo — use Steps.Utilities.CoolProp.PropsSI (ARM64-safe)
+RUN cat > /opt/libs/SCOPE/src/Modelica/Steps/Components/Recuperator.mo << 'RECUP_EOF'
+within Steps.Components;
+model Recuperator "Counter-flow recuperator using PropsSI (no ExternalMedia C dependency)"
+  extends Steps.Components.BaseExchanger;
+  import CP = Steps.Utilities.CoolProp;
+  Real eta(min=0, max=1) "Heat exchange effectiveness";
+  Modelica.Units.SI.SpecificEnthalpy h_hot_in;
+  Modelica.Units.SI.SpecificEnthalpy h_cold_in;
+  Modelica.Units.SI.Temperature T_hot_in;
+  Modelica.Units.SI.Temperature T_cold_in;
+  Modelica.Units.SI.SpecificEnthalpy h_cold_at_Thot;
+  Modelica.Units.SI.SpecificEnthalpy h_hot_at_Tcold;
+  Real Q_max_hot;
+  Real Q_max_cold;
+  Real Q_actual;
+equation
+  h_hot_in  = inStream(inlet_hot.h_outflow);
+  h_cold_in = inStream(inlet_cold.h_outflow);
+  T_hot_in  = CP.PropsSI("T", "P", inlet_hot.p,  "H", h_hot_in,  PBMedia.mediumName);
+  T_cold_in = CP.PropsSI("T", "P", inlet_cold.p, "H", h_cold_in, PBMedia.mediumName);
+  h_cold_at_Thot = CP.PropsSI("H", "P", inlet_cold.p, "T", T_hot_in,  PBMedia.mediumName);
+  h_hot_at_Tcold = CP.PropsSI("H", "P", inlet_hot.p,  "T", T_cold_in, PBMedia.mediumName);
+  Q_max_hot  = inlet_hot.m_flow  * (h_hot_in - h_cold_at_Thot);
+  Q_max_cold = inlet_cold.m_flow * (h_hot_at_Tcold - h_cold_in);
+  Q_actual = eta * min(Q_max_hot, Q_max_cold);
+  outlet_cold.p        = inlet_cold.p;
+  outlet_cold.m_flow  + inlet_cold.m_flow = 0;
+  outlet_cold.h_outflow = h_cold_in + Q_actual / inlet_cold.m_flow;
+  inlet_cold.h_outflow  = inStream(outlet_cold.h_outflow);
+  outlet_hot.p         = inlet_hot.p;
+  outlet_hot.m_flow   + inlet_hot.m_flow = 0;
+  outlet_hot.h_outflow  = h_hot_in - Q_actual / inlet_hot.m_flow;
+  inlet_hot.h_outflow   = inStream(outlet_hot.h_outflow);
+end Recuperator;
+RECUP_EOF
+
+# Build MyProps.so for ARM64 — thin CoolProp C-API wrapper
+# (replaces x86-only precompiled libMyProps from SCOPE)
+COPY scripts/myprops_stub.c /tmp/myprops_stub.c
+RUN mkdir -p /opt/libs/SCOPE/src/Modelica/Steps/Resources/Library/aarch64-linux && \
+    gcc -O2 -fPIC -shared \
+        /tmp/myprops_stub.c \
+        -L/opt/libs/CoolProp -lCoolProp \
+        -Wl,-rpath,'$ORIGIN' \
+        -o /opt/libs/SCOPE/src/Modelica/Steps/Resources/Library/aarch64-linux/libMyProps.so \
+        -lm && \
+    echo "libMyProps.so (ARM64 stub) built successfully."
+
 # ── ExternalMedia (ARM64, self-contained shared lib) ─────────────────────────
 # ExternalMedia 4.0.0 embeds CoolProp as OBJECT library (no external .so dep).
 # Reuse /build/CoolProp/src (kept from the standalone CoolProp build) as the
@@ -120,6 +223,7 @@ RUN mkdir -p /build/ExternalMedia && \
 # Collect all shared libraries and update ldconfig
 RUN echo "/opt/libs/CoolProp" >> /etc/ld.so.conf.d/sco2rl.conf && \
     echo "/opt/libs/ExternalMedia/Resources/Library/linux64" >> /etc/ld.so.conf.d/sco2rl.conf && \
+    echo "/opt/libs/SCOPE/src/Modelica/Steps/Resources/Library/aarch64-linux" >> /etc/ld.so.conf.d/sco2rl.conf && \
     ldconfig
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────

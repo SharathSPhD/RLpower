@@ -1,7 +1,7 @@
 """Tests for ComponentFactory and component dataclasses.
 
-TDD: These tests are written BEFORE the implementation.
 Tests cover ComponentFactory.create(), topology filtering, and error handling.
+All Modelica types use the real SCOPE library namespace (Steps.Components.*).
 """
 import pytest
 
@@ -15,113 +15,105 @@ from sco2rl.physics.metamodel.components import (
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 COMPRESSOR_CONFIG = {
-    "type": "SCOPE.Compressors.CentrifugalCompressor",
+    "type": "Steps.Components.Pump",
     "topologies": ["simple_recuperated", "recompression_brayton"],
     "params": {
-        "eta_design": 0.88,
-        "N_design_rpm": 3600,
-        "beta_ratio_design": 2.4,
-        "inlet_volume_flow_m3_s": 0.70,
+        "p_outlet": 18000000.0,
+        "eta": 0.88,
     },
 }
 
 TURBINE_CONFIG = {
-    "type": "SCOPE.Turbines.AxialTurbine",
+    "type": "Steps.Components.Turbine",
     "topologies": ["simple_recuperated", "recompression_brayton"],
     "params": {
-        "eta_design": 0.92,
-        "N_design_rpm": 3600,
-        "expansion_ratio_design": 2.4,
+        "p_out": 7500000.0,
+        "eta": 0.92,
     },
 }
 
 RECUPERATOR_CONFIG = {
-    "type": "ThermoPower.Gas.HE",
+    "type": "Steps.Components.Recuperator",
     "topologies": ["simple_recuperated"],
     "params": {
-        "UA_design": 750.0,
-        "effectiveness_design": 0.92,
-        "pressure_drop_hot_kpa": 45.0,
-        "pressure_drop_cold_kpa": 70.0,
+        "eta": 0.92,
     },
 }
 
 BYPASS_VALVE_CONFIG = {
-    "type": "ThermoPower.Water.ValveLin",
+    "type": "Steps.Components.Valve",
     "topologies": ["simple_recuperated", "recompression_brayton"],
     "params": {
-        "Cv_design": 100.0,
-        "opening_min": 0.0,
-        "opening_max": 1.0,
+        "p_outlet": 7500000.0,
+    },
+}
+
+REGULATOR_CONFIG = {
+    "type": "Steps.Components.Regulator",
+    "topologies": ["simple_recuperated", "recompression_brayton"],
+    "params": {
+        "p_init": 18000000.0,
+        "T_init": 973.15,
+        "m_flow_init": 95.0,
     },
 }
 
 # Full set of components matching base_cycle.yaml
 ALL_COMPONENTS_CONFIG = {
-    "main_compressor": {
-        "type": "SCOPE.Compressors.CentrifugalCompressor",
+    "regulator": {
+        "type": "Steps.Components.Regulator",
         "topologies": ["simple_recuperated", "recompression_brayton"],
-        "params": {"eta_design": 0.88, "N_design_rpm": 3600},
+        "params": {"p_init": 18000000.0, "T_init": 973.15, "m_flow_init": 95.0},
+    },
+    "main_compressor": {
+        "type": "Steps.Components.Pump",
+        "topologies": ["simple_recuperated", "recompression_brayton"],
+        "params": {"p_outlet": 18000000.0, "eta": 0.88},
     },
     "turbine": {
-        "type": "SCOPE.Turbines.AxialTurbine",
+        "type": "Steps.Components.Turbine",
         "topologies": ["simple_recuperated", "recompression_brayton"],
-        "params": {"eta_design": 0.92, "N_design_rpm": 3600},
+        "params": {"p_out": 7500000.0, "eta": 0.92},
     },
     "recuperator": {
-        "type": "ThermoPower.Gas.HE",
+        "type": "Steps.Components.Recuperator",
         "topologies": ["simple_recuperated"],
-        "params": {"UA_design": 750.0},
+        "params": {"eta": 0.92},
     },
     "recuperator_high_temp": {
-        "type": "ThermoPower.Gas.HE",
+        "type": "Steps.Components.Recuperator",
         "topologies": ["recompression_brayton"],
-        "params": {"UA_design": 850.0},
+        "params": {"eta": 0.95},
     },
     "recuperator_low_temp": {
-        "type": "ThermoPower.Gas.HE",
+        "type": "Steps.Components.Recuperator",
         "topologies": ["recompression_brayton"],
-        "params": {"UA_design": 650.0},
+        "params": {"eta": 0.93},
     },
     "precooler": {
-        "type": "ThermoPower.Gas.HE",
+        "type": "Steps.Components.FanCooler",
         "topologies": ["simple_recuperated", "recompression_brayton"],
-        "params": {"UA_design": 380.0},
-    },
-    "heat_source": {
-        "type": "SCOPE.HeatSources.ExhaustHeatSource",
-        "topologies": ["simple_recuperated", "recompression_brayton"],
-        "params": {"T_exhaust_min_c": 200.0},
+        "params": {"T_output": 305.65},
     },
     "bypass_valve": {
-        "type": "ThermoPower.Water.ValveLin",
+        "type": "Steps.Components.Valve",
         "topologies": ["simple_recuperated", "recompression_brayton"],
-        "params": {"Cv_design": 100.0},
-    },
-    "igv": {
-        "type": "SCOPE.Actuators.InletGuideVane",
-        "topologies": ["simple_recuperated", "recompression_brayton"],
-        "params": {"angle_min_deg": -30.0},
+        "params": {"p_outlet": 7500000.0},
     },
     "inventory_valve": {
-        "type": "ThermoPower.Water.ValveLin",
+        "type": "Steps.Components.Valve",
         "topologies": ["simple_recuperated", "recompression_brayton"],
-        "params": {"Cv_design": 40.0},
-    },
-    "cooling_valve": {
-        "type": "ThermoPower.Water.ValveLin",
-        "topologies": ["simple_recuperated", "recompression_brayton"],
-        "params": {"Cv_design": 85.0},
+        "params": {"p_outlet": 7500000.0},
     },
     "recompressor": {
-        "type": "SCOPE.Compressors.CentrifugalCompressor",
+        "type": "Steps.Components.Pump",
         "topologies": ["recompression_brayton"],
-        "params": {"eta_design": 0.87, "N_design_rpm": 3600},
+        "params": {"p_outlet": 18000000.0, "eta": 0.87},
     },
     "split_valve": {
-        "type": "ThermoPower.Water.SplitValve",
+        "type": "Steps.Components.Splitter",
         "topologies": ["recompression_brayton"],
-        "params": {"split_ratio_min": 0.15},
+        "params": {"split_ratio": 0.35},
     },
 }
 
@@ -133,32 +125,40 @@ class TestComponentFactoryCreate:
         spec = ComponentFactory.create("main_compressor", COMPRESSOR_CONFIG)
         assert isinstance(spec, ComponentSpec)
         assert spec.name == "main_compressor"
-        assert spec.modelica_type == "SCOPE.Compressors.CentrifugalCompressor"
-        assert spec.params["eta_design"] == pytest.approx(0.88)
-        assert spec.params["N_design_rpm"] == 3600
+        assert spec.modelica_type == "Steps.Components.Pump"
+        assert spec.params["eta"] == pytest.approx(0.88)
+        assert spec.params["p_outlet"] == pytest.approx(18000000.0)
 
     def test_create_turbine_from_yaml(self):
         spec = ComponentFactory.create("turbine", TURBINE_CONFIG)
         assert isinstance(spec, ComponentSpec)
         assert spec.name == "turbine"
-        assert spec.modelica_type == "SCOPE.Turbines.AxialTurbine"
-        assert spec.params["eta_design"] == pytest.approx(0.92)
-        assert spec.params["expansion_ratio_design"] == pytest.approx(2.4)
+        assert spec.modelica_type == "Steps.Components.Turbine"
+        assert spec.params["eta"] == pytest.approx(0.92)
+        assert spec.params["p_out"] == pytest.approx(7500000.0)
 
-    def test_create_heat_exchanger_from_yaml(self):
+    def test_create_recuperator_from_yaml(self):
         spec = ComponentFactory.create("recuperator", RECUPERATOR_CONFIG)
         assert isinstance(spec, ComponentSpec)
         assert spec.name == "recuperator"
-        assert spec.modelica_type == "ThermoPower.Gas.HE"
-        assert spec.params["UA_design"] == pytest.approx(750.0)
-        assert spec.params["effectiveness_design"] == pytest.approx(0.92)
+        assert spec.modelica_type == "Steps.Components.Recuperator"
+        assert spec.params["eta"] == pytest.approx(0.92)
 
     def test_create_valve_from_yaml(self):
         spec = ComponentFactory.create("bypass_valve", BYPASS_VALVE_CONFIG)
         assert isinstance(spec, ComponentSpec)
         assert spec.name == "bypass_valve"
-        assert spec.modelica_type == "ThermoPower.Water.ValveLin"
-        assert spec.params["Cv_design"] == pytest.approx(100.0)
+        assert spec.modelica_type == "Steps.Components.Valve"
+        assert spec.params["p_outlet"] == pytest.approx(7500000.0)
+
+    def test_create_regulator_from_yaml(self):
+        spec = ComponentFactory.create("regulator", REGULATOR_CONFIG)
+        assert isinstance(spec, ComponentSpec)
+        assert spec.name == "regulator"
+        assert spec.modelica_type == "Steps.Components.Regulator"
+        assert spec.params["p_init"] == pytest.approx(18000000.0)
+        assert spec.params["T_init"] == pytest.approx(973.15)
+        assert spec.params["m_flow_init"] == pytest.approx(95.0)
 
     def test_unknown_component_type_raises(self):
         bad_config = {
@@ -206,10 +206,9 @@ class TestTopologyFiltering:
     def test_component_for_topology_filter_simple(self, all_specs):
         """simple_recuperated returns correct subset."""
         filtered = ComponentFactory.get_components_for_topology(all_specs, "simple_recuperated")
-        # Must include these
         expected_included = {
-            "main_compressor", "turbine", "recuperator", "precooler",
-            "heat_source", "bypass_valve", "igv", "inventory_valve", "cooling_valve",
+            "regulator", "main_compressor", "turbine", "recuperator",
+            "precooler", "bypass_valve", "inventory_valve",
         }
         for name in expected_included:
             assert name in filtered, f"Expected {name!r} in simple_recuperated components"
@@ -235,11 +234,14 @@ class TestTopologyFiltering:
         assert "recuperator" not in filtered
 
     def test_simple_recuperated_count(self, all_specs):
-        """simple_recuperated topology yields exactly 9 components."""
+        """simple_recuperated topology yields exactly 7 components."""
         filtered = ComponentFactory.get_components_for_topology(all_specs, "simple_recuperated")
-        assert len(filtered) == 9
+        # regulator, main_compressor, turbine, recuperator, precooler, bypass_valve, inventory_valve
+        assert len(filtered) == 7
 
     def test_recompression_brayton_count(self, all_specs):
-        """recompression_brayton topology yields exactly 12 components."""
+        """recompression_brayton topology yields exactly 10 components."""
         filtered = ComponentFactory.get_components_for_topology(all_specs, "recompression_brayton")
-        assert len(filtered) == 12
+        # regulator, main_compressor, turbine, recuperator_ht, recuperator_lt, precooler,
+        # bypass_valve, inventory_valve, recompressor, split_valve
+        assert len(filtered) == 10

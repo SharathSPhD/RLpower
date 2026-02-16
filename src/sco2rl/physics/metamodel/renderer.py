@@ -91,41 +91,45 @@ class MoFileRenderer:
     # ── Private render helpers ────────────────────────────────────────────────
 
     def _render_model_header(self, model: CycleModel) -> str:
-        """Render the opening 'model Name' line."""
-        return f"model {model.package}"
+        """Render the 'within' declaration and opening 'model Name' line.
+
+        SCOPE components live in the Steps.* package hierarchy; the generated
+        model must declare itself 'within Steps.Cycle' so OMPython can resolve
+        all Steps.Components.* references without extra import statements.
+        """
+        return f"within Steps.Cycle;\n\nmodel {model.package}"
 
     def _render_imports(self, model: CycleModel) -> str:
-        """Render the import statements for external libraries."""
+        """Render the import statements for external libraries.
+
+        SCOPE components use Steps.* namespace; all SI types are resolved
+        within the SCOPE package itself. No Modelica.SIunits imports are
+        needed in the wrapper model (avoids Modelica 3.x/4.x compatibility issues).
+        """
         i = self._INDENT
         lines = [
-            f"{i}// --- Imports ---",
-            f"{i}import ExternalMedia.Media.CoolPropMedium;",
+            f"{i}// --- Steps library (SCOPE) ---",
+            f"{i}// Components: Steps.Components.*   Fluid: Steps.Media.SCO2",
         ]
         return "\n".join(lines)
 
     def _render_fluid_medium(self, model: CycleModel) -> str:
-        """Render the fluid medium package declaration with enable_BICUBIC=1.
+        """Render the CoolProp medium note.
 
-        RULE-P3: 'enable_BICUBIC=1' is injected into the substanceNames
-        annotation here, ensuring it appears in every rendered .mo file.
+        RULE-P3: enable_BICUBIC=1 is required near the CO₂ critical point.
+        In the SCOPE library, CoolProp is accessed via Steps.Utilities.CoolProp
+        (backed by libMyProps.so — the BICUBIC flag is compiled into that library).
+        The ExternalMedia package is NOT used by SCOPE components; they inherit
+        PBMedia = Steps.Media.SCO2 from TwoPorts.
         """
         i = self._INDENT
-        fluid = model.fluid_config
-        medium_class = fluid.get("medium", "ExternalMedia.Media.CoolPropMedium")
-        coolprop_name = fluid.get("coolprop_name", "CarbonDioxide")
-        # RULE-P3: always include enable_BICUBIC=1
-        coolprop_options = fluid.get("coolprop_options", "enable_BICUBIC=1")
-        substance_str = f"{coolprop_name}|{coolprop_options}"
-
         lines = [
             "",
-            f"{i}// --- Fluid medium (RULE-P3: enable_BICUBIC=1 mandatory near CO\u2082 critical point) ---",
-            f"{i}package Medium = {medium_class}(",
-            f"{i}{i}mediumName=\"{coolprop_name}\",",
-            f"{i}{i}libraryName=\"CoolProp\",",
-            f"{i}{i}substanceNames={{\" {substance_str}\"}},",
-            f"{i}{i}ThermoStates=Modelica.Media.Interfaces.Choices.IndependentVariables.ph",
-            f"{i});",
+            f"{i}// --- Fluid medium ---",
+            f"{i}// CoolProp backend: Steps.Utilities.CoolProp (libMyProps.so)",
+            f"{i}// RULE-P3: enable_BICUBIC=1 is enforced inside libMyProps.so",
+            f"{i}// for stable interpolation near CO2 critical point (31.1\u00b0C, 7.38 MPa).",
+            f"{i}// PBMedia = Steps.Media.SCO2 is inherited by all TwoPorts components.",
             "",
         ]
         return "\n".join(lines)

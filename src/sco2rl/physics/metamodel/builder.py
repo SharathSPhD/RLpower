@@ -62,19 +62,19 @@ class SCO2CycleBuilder:
     # Required component names per topology. build() enforces these.
     REQUIRED_COMPONENTS: dict[str, list[str]] = {
         "simple_recuperated": [
+            "regulator",        # inlet boundary condition (turbine inlet T, P, m_flow)
             "main_compressor",
             "turbine",
             "recuperator",
             "precooler",
-            "heat_source",
         ],
         "recompression_brayton": [
+            "regulator",        # inlet boundary condition
             "main_compressor",
             "turbine",
             "recuperator_high_temp",
             "recuperator_low_temp",
             "precooler",
-            "heat_source",
             "recompressor",
         ],
     }
@@ -136,6 +136,12 @@ class SCO2CycleBuilder:
     def build(self) -> CycleModel:
         """Validate the builder state and return a CycleModel.
 
+        Only components that appear in at least one connection are included in
+        the output model.  Declared-but-unconnected components (e.g. actuator
+        valves not yet wired into the flow path) are silently excluded, which
+        prevents Modelica from reporting them as floating subsystems with
+        imbalanced equations.
+
         Raises:
             BuildError: If a required component for the active topology is
                 missing from the builder.
@@ -151,11 +157,25 @@ class SCO2CycleBuilder:
                     f"{self._topology!r}. Add it with add_component()."
                 )
 
+        # Only include components that appear in at least one connection.
+        # Unconnected actuators (bypass_valve, inventory_valve) are omitted so
+        # that the generated .mo file has no floating, equation-unbalanced blocks.
+        connected: set[str] = set()
+        for conn in self._connections:
+            connected.add(conn.from_port.split(".")[0])
+            connected.add(conn.to_port.split(".")[0])
+
+        active_components = {
+            name: spec
+            for name, spec in self._components.items()
+            if name in connected
+        }
+
         return CycleModel(
             name=self._name,
             package=self._package,
             fluid_config=dict(self._fluid_config),
-            components=dict(self._components),
+            components=active_components,
             connections=list(self._connections),
             topology=self._topology,
         )

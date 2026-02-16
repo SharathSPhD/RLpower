@@ -57,9 +57,9 @@ class TestRenderBasics:
         assert simple_cycle.package in result
 
     def test_render_valid_modelica_structure_starts(self, renderer, simple_cycle):
-        """Output starts with 'model '."""
+        """Output starts with 'within Steps.Cycle;' (SCOPE package declaration)."""
         result = renderer.render(simple_cycle)
-        assert result.strip().startswith("model ")
+        assert result.strip().startswith("within Steps.Cycle;")
 
     def test_render_valid_modelica_structure_ends(self, renderer, simple_cycle):
         """Output ends with 'end ' + package name + ';'."""
@@ -85,13 +85,14 @@ class TestRenderBasics:
 # ─── Fluid medium & BICUBIC ───────────────────────────────────────────────────
 
 class TestFluidContent:
-    def test_render_contains_fluid_medium(self, renderer, simple_cycle):
-        """Output contains ExternalMedia.Media.CoolPropMedium."""
+    def test_render_contains_scope_coolprop_note(self, renderer, simple_cycle):
+        """Output contains SCOPE CoolProp backend note (not ExternalMedia)."""
         result = renderer.render(simple_cycle)
-        assert "ExternalMedia.Media.CoolPropMedium" in result
+        # SCOPE uses Steps.Utilities.CoolProp (libMyProps.so), not ExternalMedia
+        assert "Steps.Utilities.CoolProp" in result
 
     def test_render_contains_bicubic_flag(self, renderer, simple_cycle):
-        """Output contains 'enable_BICUBIC=1' (RULE-P3)."""
+        """Output contains 'enable_BICUBIC=1' (RULE-P3) as a comment."""
         result = renderer.render(simple_cycle)
         assert "enable_BICUBIC=1" in result
 
@@ -105,34 +106,39 @@ class TestFluidContent:
 
 class TestComponentDeclarations:
     def test_render_contains_compressor_type(self, renderer, simple_cycle):
-        """Output contains the CentrifugalCompressor Modelica type."""
+        """Output contains Steps.Components.Pump (SCOPE compressor)."""
         result = renderer.render(simple_cycle)
-        assert "SCOPE.Compressors.CentrifugalCompressor" in result
+        assert "Steps.Components.Pump" in result
 
     def test_render_contains_turbine_type(self, renderer, simple_cycle):
-        """Output contains the AxialTurbine Modelica type."""
+        """Output contains Steps.Components.Turbine (SCOPE turbine)."""
         result = renderer.render(simple_cycle)
-        assert "SCOPE.Turbines.AxialTurbine" in result
+        assert "Steps.Components.Turbine" in result
 
-    def test_render_contains_heat_exchanger_type(self, renderer, simple_cycle):
-        """Output contains the HE Modelica type for recuperator/precooler."""
+    def test_render_contains_recuperator_type(self, renderer, simple_cycle):
+        """Output contains Steps.Components.Recuperator."""
         result = renderer.render(simple_cycle)
-        assert "ThermoPower.Gas.HE" in result
+        assert "Steps.Components.Recuperator" in result
 
-    def test_render_contains_valve_type(self, renderer, simple_cycle):
-        """Output contains the ValveLin Modelica type."""
+    def test_render_contains_precooler_type(self, renderer, simple_cycle):
+        """Output contains Steps.Components.FanCooler."""
         result = renderer.render(simple_cycle)
-        assert "ThermoPower.Water.ValveLin" in result
+        assert "Steps.Components.FanCooler" in result
 
-    def test_render_contains_igv_type(self, renderer, simple_cycle):
-        """Output contains the InletGuideVane Modelica type."""
-        result = renderer.render(simple_cycle)
-        assert "SCOPE.Actuators.InletGuideVane" in result
+    def test_render_simple_cycle_no_valve_type(self, renderer, simple_cycle):
+        """simple_recuperated output does NOT contain Steps.Components.Valve.
 
-    def test_render_contains_heat_source_type(self, renderer, simple_cycle):
-        """Output contains the ExhaustHeatSource Modelica type."""
+        bypass_valve and inventory_valve are declared in the topology config but
+        have no connections in the simple_recuperated flow path.  build() filters
+        unconnected components, so no Valve appears in the rendered model.
+        """
         result = renderer.render(simple_cycle)
-        assert "SCOPE.HeatSources.ExhaustHeatSource" in result
+        assert "Steps.Components.Valve" not in result
+
+    def test_render_contains_regulator_type(self, renderer, simple_cycle):
+        """Output contains Steps.Components.Regulator (inlet boundary condition)."""
+        result = renderer.render(simple_cycle)
+        assert "Steps.Components.Regulator" in result
 
     def test_render_contains_all_component_names(self, renderer, simple_cycle):
         """Output contains each component's instance name."""
@@ -164,7 +170,7 @@ class TestTopologySpecificContent:
         """Recompression cycle output contains split_valve instance."""
         result = renderer.render(recompression_cycle)
         assert "split_valve" in result
-        assert "ThermoPower.Water.SplitValve" in result
+        assert "Steps.Components.Splitter" in result
 
     def test_render_simple_no_split_valve(self, renderer, simple_cycle):
         """Simple recuperated cycle output does NOT contain split_valve."""
@@ -221,5 +227,5 @@ class TestRenderToFile:
         out_path = tmp_path / "test.mo"
         renderer.render_to_file(simple_cycle, out_path)
         content = out_path.read_text()
-        assert content.strip().startswith("model ")
+        assert content.strip().startswith("within Steps.Cycle;")
         assert "equation" in content

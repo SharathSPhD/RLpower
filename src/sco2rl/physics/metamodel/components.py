@@ -3,14 +3,16 @@
 ComponentFactory creates typed component specs from YAML config dicts.
 All specs are topology-tagged so SCO2CycleBuilder can filter by active topology.
 
-Supported Modelica type strings (must match YAML 'type' field exactly):
-    SCOPE.Compressors.CentrifugalCompressor
-    SCOPE.Turbines.AxialTurbine
-    ThermoPower.Gas.HE
-    ThermoPower.Water.ValveLin
-    ThermoPower.Water.SplitValve
-    SCOPE.Actuators.InletGuideVane
-    SCOPE.HeatSources.ExhaustHeatSource
+Supported Modelica type strings (must match YAML 'type' field exactly).
+All types live in the Steps.Components.* namespace from the SCOPE library:
+    Steps.Components.Pump          — compressor (input Real eta, p_outlet)
+    Steps.Components.Turbine       — turbine (parameter p_out, eta)
+    Steps.Components.Recuperator   — recuperator (inlet_hot/cold, outlet_hot/cold ports)
+    Steps.Components.FanCooler     — precooler (parameter T_output in K)
+    Steps.Components.Valve         — bypass/inventory valve (parameter p_outlet)
+    Steps.Components.Splitter      — recompression split (parameter split_ratio)
+    Steps.Components.Regulator     — inlet boundary condition (parameters p_init, T_init, m_flow_init)
+    Steps.Components.PCMHeater     — waste heat source (RealInput T_output_set)
 """
 from __future__ import annotations
 
@@ -20,15 +22,17 @@ from typing import Any
 
 # ─── Known Modelica type strings ──────────────────────────────────────────────
 # These must match the 'type' values in base_cycle.yaml exactly.
+# All classes are from the SCOPE library (Steps.Components.*).
 
 _KNOWN_MODELICA_TYPES: frozenset[str] = frozenset({
-    "SCOPE.Compressors.CentrifugalCompressor",
-    "SCOPE.Turbines.AxialTurbine",
-    "ThermoPower.Gas.HE",
-    "ThermoPower.Water.ValveLin",
-    "ThermoPower.Water.SplitValve",
-    "SCOPE.Actuators.InletGuideVane",
-    "SCOPE.HeatSources.ExhaustHeatSource",
+    "Steps.Components.Pump",           # compressor
+    "Steps.Components.Turbine",        # turbine
+    "Steps.Components.Recuperator",    # recuperator (hot+cold ports)
+    "Steps.Components.FanCooler",      # precooler
+    "Steps.Components.Valve",          # bypass / inventory valve
+    "Steps.Components.Splitter",       # recompression split valve
+    "Steps.Components.Regulator",      # inlet boundary condition
+    "Steps.Components.PCMHeater",      # waste heat source
 })
 
 

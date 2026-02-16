@@ -1,6 +1,7 @@
 .claude/
 docs/
-memories/
+# memories/ -- stage memory files are tracked
+
 CLAUDE.md
 MEMORY.md
 RULES.md

@@ -7,9 +7,7 @@ cycle:
   package: SCO2RecuperatedCycle
   libraries:
     - Modelica
-    - ThermoPower
-    - SCOPE
-    - ExternalMedia
+    - Steps   # SCOPE library (Steps.* namespace)
 
 # ─── Topology Selection ───────────────────────────────────────────────────────
 # RULE-D3: Switch topology by changing type here — no code changes needed
@@ -37,150 +35,136 @@ parameters:
   design_pressure_ratio: 2.4
 
 # ─── CO₂ Fluid ───────────────────────────────────────────────────────────────
+# SCOPE uses Steps.Utilities.CoolProp (libMyProps.so), not ExternalMedia.
+# PBMedia = Steps.Media.SCO2 is inherited by all TwoPorts-derived components.
+# RULE-P3: enable_BICUBIC=1 compiled into libMyProps.so.
 fluid:
-  medium: "ExternalMedia.Media.CoolPropMedium"
-  coolprop_name: "CarbonDioxide"
-  coolprop_options: "enable_BICUBIC=1"  # RULE-P3: mandatory near critical point
+  medium: "Steps.Media.SCO2"            # PBMedia inherited by all TwoPorts components
+  coolprop_name: "CO2"
+  coolprop_options: "enable_BICUBIC=1"  # RULE-P3: enforced in libMyProps.so
   critical_temp_c: 31.1
   critical_pressure_mpa: 7.38
 
-# ─── Components (simple_recuperated topology) ─────────────────────────────────
+# ─── Components ────────────────────────────────────────────────────────────────
 # ComponentFactory creates typed dataclasses from these entries.
 # SCO2CycleBuilder.build() selects which components to instantiate based on topology.type.
+# All types are from the SCOPE library (Steps.Components.* namespace).
+#
+# Port conventions:
+#   TwoPorts (Pump, Turbine, FanCooler, Valve, Regulator): inlet / outlet
+#   Recuperator: inlet_hot / outlet_hot / inlet_cold / outlet_cold
+#   Splitter: inlet / outlet / outlet_split
 
 components:
+  # --- Boundary condition (inlet state: turbine inlet T, P, m_flow) ---
+  regulator:
+    type: Steps.Components.Regulator
+    topologies: [simple_recuperated, recompression_brayton]
+    params:
+      p_init: 18000000.0    # 18 MPa high-side pressure (Pa)
+      T_init: 973.15        # 700°C in K (design turbine inlet)
+      m_flow_init: 95.0     # kg/s design mass flow
+
   # --- Core turbomachinery ---
   main_compressor:
-    type: SCOPE.Compressors.CentrifugalCompressor
+    type: Steps.Components.Pump
     topologies: [simple_recuperated, recompression_brayton]
     params:
-      eta_design: 0.88
-      N_design_rpm: 3600
-      beta_ratio_design: 2.4
-      inlet_volume_flow_m3_s: 0.70
+      p_outlet: 18000000.0  # 18 MPa high-side pressure (Pa)
+      eta: 0.88             # isentropic efficiency
 
   turbine:
-    type: SCOPE.Turbines.AxialTurbine
+    type: Steps.Components.Turbine
     topologies: [simple_recuperated, recompression_brayton]
     params:
-      eta_design: 0.92
-      N_design_rpm: 3600
-      expansion_ratio_design: 2.4
+      p_out: 7500000.0      # 7.5 MPa low-side pressure (Pa)
+      eta: 0.92             # isentropic efficiency
 
   # --- Heat exchangers ---
   recuperator:
-    type: ThermoPower.Gas.HE
+    type: Steps.Components.Recuperator
     topologies: [simple_recuperated]   # single recuperator in simple cycle
     params:
-      UA_design: 750.0                 # kW/K — sized for simple cycle
-      effectiveness_design: 0.92
-      pressure_drop_hot_kpa: 45.0
-      pressure_drop_cold_kpa: 70.0
+      eta: 0.92             # heat exchange effectiveness
 
   recuperator_high_temp:               # recompression cycle only
-    type: ThermoPower.Gas.HE
+    type: Steps.Components.Recuperator
     topologies: [recompression_brayton]
     params:
-      UA_design: 850.0
-      effectiveness_design: 0.95
-      pressure_drop_hot_kpa: 50.0
-      pressure_drop_cold_kpa: 80.0
+      eta: 0.95
 
   recuperator_low_temp:                # recompression cycle only
-    type: ThermoPower.Gas.HE
+    type: Steps.Components.Recuperator
     topologies: [recompression_brayton]
     params:
-      UA_design: 650.0
-      effectiveness_design: 0.93
-      pressure_drop_hot_kpa: 40.0
-      pressure_drop_cold_kpa: 60.0
+      eta: 0.93
 
   precooler:
-    type: ThermoPower.Gas.HE
+    type: Steps.Components.FanCooler
     topologies: [simple_recuperated, recompression_brayton]
     params:
-      UA_design: 380.0
-      T_coolant_inlet_c: 25.0
-      mdot_coolant_design_kg_s: 70.0
+      # RULE-P1: T_compressor_inlet >= 32.2°C (1.1°C above CO2 critical point 31.1°C)
+      # 32.5°C = 305.65 K — 1.4°C margin above critical
+      T_output: 305.65      # K — precooler outlet temperature
 
-  heat_source:
-    type: SCOPE.HeatSources.ExhaustHeatSource
-    topologies: [simple_recuperated, recompression_brayton]
-    params:
-      T_exhaust_min_c: 200.0
-      T_exhaust_max_c: 1200.0
-      mdot_exhaust_design_kg_s: 40.0
-
-  # --- Actuators (actions) ---
+  # --- Actuators (RL actions) ---
+  # bypass_valve: sends turbine exhaust to precooler, bypassing recuperator hot side
   bypass_valve:
-    type: ThermoPower.Water.ValveLin
+    type: Steps.Components.Valve
     topologies: [simple_recuperated, recompression_brayton]
     params:
-      Cv_design: 100.0
-      opening_min: 0.0
-      opening_max: 1.0
+      p_outlet: 7500000.0   # 7.5 MPa — low-side pressure
 
-  igv:
-    type: SCOPE.Actuators.InletGuideVane
-    topologies: [simple_recuperated, recompression_brayton]
-    params:
-      angle_min_deg: -30.0
-      angle_max_deg: 15.0
-      design_angle_deg: 0.0
-
+  # inventory_valve: controls mass inventory (low-side pressure setpoint)
   inventory_valve:
-    type: ThermoPower.Water.ValveLin
+    type: Steps.Components.Valve
     topologies: [simple_recuperated, recompression_brayton]
     params:
-      Cv_design: 40.0
-      opening_min: 0.0
-      opening_max: 1.0
-
-  cooling_valve:
-    type: ThermoPower.Water.ValveLin
-    topologies: [simple_recuperated, recompression_brayton]
-    params:
-      Cv_design: 85.0
-      cooling_flow_min_fraction: 0.50
-      cooling_flow_max_fraction: 1.50
+      p_outlet: 7500000.0   # 7.5 MPa — low-side pressure
 
   # recompression_brayton only
   recompressor:
-    type: SCOPE.Compressors.CentrifugalCompressor
+    type: Steps.Components.Pump
     topologies: [recompression_brayton]
     params:
-      eta_design: 0.87
-      N_design_rpm: 3600
-      beta_ratio_design: 3.0
-      inlet_volume_flow_m3_s: 0.30
+      p_outlet: 18000000.0  # 18 MPa high-side pressure
+      eta: 0.87
 
   split_valve:
-    type: ThermoPower.Water.SplitValve
+    type: Steps.Components.Splitter
     topologies: [recompression_brayton]
     params:
-      split_ratio_min: 0.15
-      split_ratio_max: 0.55
+      split_ratio: 0.35     # fraction going to recompressor path
 
-# ─── Topology Flow Paths (documentation — SCO2CycleBuilder uses addConnection()) ──
+# ─── Topology Flow Paths ────────────────────────────────────────────────────────
+# Port names must match SCOPE component interfaces exactly:
+#   TwoPorts (Pump, Turbine, FanCooler, Valve, Regulator): inlet / outlet
+#   Recuperator: inlet_hot / outlet_hot / inlet_cold / outlet_cold
+#   Splitter: inlet / outlet / outlet_split
+#
+# Cycle flow (simple_recuperated):
+#   Regulator(outlet) → Turbine → Recuperator(hot) → FanCooler → Compressor →
+#   Recuperator(cold) → Regulator(inlet)
+#   The Regulator acts as the turbine inlet boundary condition + cycle closure.
+
 flow_paths:
   simple_recuperated:
-    - main_compressor.outlet -> recuperator.cold_in
-    - recuperator.cold_out -> heat_source.cold_in
-    - heat_source.cold_out -> turbine.inlet
-    - turbine.outlet -> recuperator.hot_in
-    - recuperator.hot_out -> precooler.hot_in
-    - precooler.hot_out -> main_compressor.inlet
-    - bypass_valve connects: turbine.outlet -> precooler.hot_in  # bypass path
+    - regulator.outlet -> turbine.inlet
+    - turbine.outlet -> recuperator.inlet_hot
+    - recuperator.outlet_hot -> precooler.inlet
+    - precooler.outlet -> main_compressor.inlet
+    - main_compressor.outlet -> recuperator.inlet_cold
+    - recuperator.outlet_cold -> regulator.inlet
 
   recompression_brayton:
-    - main_compressor.outlet -> recuperator_low_temp.cold_in
-    - recuperator_low_temp.cold_out -> split_valve.inlet
-    - split_valve.outlet_a -> recuperator_high_temp.cold_in
-    - split_valve.outlet_b -> recompressor.inlet
-    - recompressor.outlet -> recuperator_high_temp.cold_in   # mixing
-    - recuperator_high_temp.cold_out -> heat_source.cold_in
-    - heat_source.cold_out -> turbine.inlet
-    - turbine.outlet -> recuperator_high_temp.hot_in
-    - recuperator_high_temp.hot_out -> recuperator_low_temp.hot_in
-    - recuperator_low_temp.hot_out -> precooler.hot_in
-    - precooler.hot_out -> main_compressor.inlet
+    - regulator.outlet -> turbine.inlet
+    - turbine.outlet -> recuperator_high_temp.inlet_hot
+    - recuperator_high_temp.outlet_hot -> recuperator_low_temp.inlet_hot
+    - recuperator_low_temp.outlet_hot -> precooler.inlet
+    - precooler.outlet -> split_valve.inlet
+    - split_valve.outlet -> main_compressor.inlet
+    - split_valve.outlet_split -> recompressor.inlet
+    - main_compressor.outlet -> recuperator_low_temp.inlet_cold
+    - recompressor.outlet -> recuperator_high_temp.inlet_cold
+    - recuperator_low_temp.outlet_cold -> recuperator_high_temp.inlet_cold
+    - recuperator_high_temp.outlet_cold -> regulator.inlet

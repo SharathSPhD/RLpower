@@ -29,11 +29,11 @@ def model_config():
 
 @pytest.fixture
 def simple_spec():
-    """A minimal ComponentSpec for testing."""
+    """A minimal ComponentSpec for testing (Steps.Components.Pump)."""
     return ComponentSpec(
         name="main_compressor",
-        modelica_type="SCOPE.Compressors.CentrifugalCompressor",
-        params={"eta_design": 0.88},
+        modelica_type="Steps.Components.Pump",
+        params={"p_outlet": 18000000.0, "eta": 0.88},
         topologies=["simple_recuperated", "recompression_brayton"],
     )
 
@@ -42,8 +42,8 @@ def simple_spec():
 def turbine_spec():
     return ComponentSpec(
         name="turbine",
-        modelica_type="SCOPE.Turbines.AxialTurbine",
-        params={"eta_design": 0.92},
+        modelica_type="Steps.Components.Turbine",
+        params={"p_out": 7500000.0, "eta": 0.92},
         topologies=["simple_recuperated", "recompression_brayton"],
     )
 
@@ -52,8 +52,8 @@ def turbine_spec():
 def recuperator_spec():
     return ComponentSpec(
         name="recuperator",
-        modelica_type="ThermoPower.Gas.HE",
-        params={"UA_design": 750.0},
+        modelica_type="Steps.Components.Recuperator",
+        params={"eta": 0.92},
         topologies=["simple_recuperated"],
     )
 
@@ -62,32 +62,32 @@ def recuperator_spec():
 def precooler_spec():
     return ComponentSpec(
         name="precooler",
-        modelica_type="ThermoPower.Gas.HE",
-        params={"UA_design": 380.0},
+        modelica_type="Steps.Components.FanCooler",
+        params={"T_output": 305.65},
         topologies=["simple_recuperated", "recompression_brayton"],
     )
 
 
 @pytest.fixture
-def heat_source_spec():
+def regulator_spec():
     return ComponentSpec(
-        name="heat_source",
-        modelica_type="SCOPE.HeatSources.ExhaustHeatSource",
-        params={"T_exhaust_max_c": 1200.0},
+        name="regulator",
+        modelica_type="Steps.Components.Regulator",
+        params={"p_init": 18000000.0, "T_init": 973.15, "m_flow_init": 95.0},
         topologies=["simple_recuperated", "recompression_brayton"],
     )
 
 
 @pytest.fixture
-def minimal_simple_builder(simple_spec, turbine_spec, recuperator_spec, precooler_spec, heat_source_spec):
+def minimal_simple_builder(simple_spec, turbine_spec, recuperator_spec, precooler_spec, regulator_spec):
     """Builder with the 5 required components for simple_recuperated."""
     builder = SCO2CycleBuilder()
     builder._topology = "simple_recuperated"
+    builder.add_component("regulator", regulator_spec)
     builder.add_component("main_compressor", simple_spec)
     builder.add_component("turbine", turbine_spec)
     builder.add_component("recuperator", recuperator_spec)
     builder.add_component("precooler", precooler_spec)
-    builder.add_component("heat_source", heat_source_spec)
     return builder
 
 
@@ -143,26 +143,36 @@ class TestBuild:
         assert isinstance(cycle, CycleModel)
 
     def test_builder_build_simple_recuperated(self, model_config):
-        """build() returns CycleModel with 9 components for simple_recuperated."""
+        """build() returns CycleModel with 5 connected components for simple_recuperated.
+
+        Only components that appear in at least one connection are included.
+        bypass_valve and inventory_valve are topology-declared but unconnected
+        in simple_recuperated flow paths, so they are excluded from the model.
+        Connected: regulator, turbine, recuperator, precooler, main_compressor.
+        """
         builder = SCO2CycleBuilder.from_config(model_config)
         cycle = builder.build()
-        assert len(cycle.components) == 9
+        assert len(cycle.components) == 5
 
     def test_builder_build_recompression(self, model_config):
-        """build() returns CycleModel with 12+ components for recompression_brayton."""
+        """build() returns CycleModel with 8 connected components for recompression_brayton.
+
+        Connected: regulator, turbine, recuperator_high_temp, recuperator_low_temp,
+        precooler, split_valve, main_compressor, recompressor.
+        """
         # Override topology
         model_config["topology"]["type"] = "recompression_brayton"
         builder = SCO2CycleBuilder.from_config(model_config)
         cycle = builder.build()
-        assert len(cycle.components) >= 12
+        assert len(cycle.components) == 8
 
     def test_builder_missing_required_component_raises(self, simple_spec):
         """build() raises BuildError if mandatory component missing."""
         builder = SCO2CycleBuilder()
         builder._topology = "simple_recuperated"
-        # Only add one component — missing turbine, recuperator, precooler, heat_source
+        # Only add compressor — missing regulator, turbine, recuperator, precooler
         builder.add_component("main_compressor", simple_spec)
-        with pytest.raises(BuildError, match="turbine"):
+        with pytest.raises(BuildError, match="regulator"):
             builder.build()
 
     def test_cycle_model_has_all_connections(self, model_config):
@@ -172,17 +182,17 @@ class TestBuild:
         assert len(cycle.connections) > 0
 
     def test_cycle_model_component_count_simple(self, model_config):
-        """CycleModel.components dict has 9 components for simple_recuperated."""
+        """CycleModel.components dict has 5 connected components for simple_recuperated."""
         builder = SCO2CycleBuilder.from_config(model_config)
         cycle = builder.build()
-        assert len(cycle.components) == 9
+        assert len(cycle.components) == 5
 
     def test_cycle_model_component_count_recompression(self, model_config):
-        """CycleModel.components dict has 12 components for recompression_brayton."""
+        """CycleModel.components dict has 8 connected components for recompression_brayton."""
         model_config["topology"]["type"] = "recompression_brayton"
         builder = SCO2CycleBuilder.from_config(model_config)
         cycle = builder.build()
-        assert len(cycle.components) == 12
+        assert len(cycle.components) == 8
 
     def test_cycle_model_has_topology(self, model_config):
         """CycleModel carries the topology string."""
@@ -203,11 +213,11 @@ class TestBuild:
         assert cycle.package == "SCO2RecuperatedCycle"
 
     def test_cycle_model_has_fluid_config(self, model_config):
-        """CycleModel carries the fluid config dict."""
+        """CycleModel carries the fluid config dict with coolprop_name."""
         builder = SCO2CycleBuilder.from_config(model_config)
         cycle = builder.build()
-        assert "medium" in cycle.fluid_config
-        assert "CoolPropMedium" in cycle.fluid_config["medium"]
+        assert "coolprop_name" in cycle.fluid_config
+        assert cycle.fluid_config["coolprop_name"] == "CO2"
 
 
 # ─── from_config() ────────────────────────────────────────────────────────────
