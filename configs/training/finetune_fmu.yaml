@@ -1,0 +1,18 @@
+# Fine-tuning configuration for Stage 4
+# Loads best checkpoint from Stage 2 (FMU-direct) or Stage 3 (surrogate-trained)
+
+fine_tuning:
+  finetune_steps: 500_000           # 10% of original training steps
+  finetune_lr: 5.0e-5               # 10x lower than training lr=3e-4
+  checkpoint_dir: "artifacts/checkpoints/finetune"
+  eval_freq: 25_000                 # Evaluate every 25K steps
+  eval_episodes: 10
+  seed: 42
+
+# Cross-validation config
+cross_validation:
+  n_eval_episodes: 50               # Enough episodes for statistical significance
+  T_comp_inlet_var: "T_compressor_inlet"
+  deterministic: true
+  selection_metric: "mean_reward"   # "mean_reward" or "violation_rate"
+  report_path: "artifacts/cross_validation/report.json"
