@@ -112,6 +112,8 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning:gymnasium",
     "ignore::UserWarning:stable_baselines3",
+    "ignore::DeprecationWarning:torch.onnx",
+    "ignore::UserWarning:torch.onnx",
 ]
 
 # ─── Ruff (Linting + Formatting) ──────────────────────────────────────────────
