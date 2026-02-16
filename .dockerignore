@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+.pre-commit-config.yaml
+
+# Python artifacts
+*.pyc
+__pycache__/
+.pytest_cache/
+.hypothesis/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Worktrees (gitignored, should never be in image)
+.worktrees/
+
+# RL training artifacts (large, built at runtime)
+artifacts/
+*.fmu
+*.h5
+*.hdf5
+*.pkl
+*.zip
+runs/
+logs/
+checkpoints/
+
+# Modelica build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Claude Code local context (never in image)
+.claude/
+SPEC.md
+RULES.md
+MEMORY.md
+memories/
+docs/
