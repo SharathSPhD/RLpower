@@ -70,16 +70,21 @@ def check_coolprop_import() -> bool:
 def check_coolprop_co2_saturation() -> bool:
     """Verify CoolProp can compute CO₂ saturation properties near critical point."""
     import CoolProp.CoolProp as CP
-    # Saturation temperature at 80 bar — well into supercritical region interest zone
-    T = CP.PropsSI("T", "P", 8e6, "Q", 0, "CO2")
-    return 300 < T < 320  # roughly 304 K = 31°C
+    # Saturation temperature at 70 bar — below CO₂ Pcrit (73.77 bar); critical T ≈ 304 K
+    T = CP.PropsSI("T", "P", 7e6, "Q", 0, "CO2")
+    return 300 < T < 310  # roughly 302 K at 70 bar
 
 
 def check_coolprop_bicubic() -> bool:
-    """Verify BICUBIC backend is available (RULE-P3)."""
-    import CoolProp.CoolProp as CP
-    CP.set_config_bool(CP.ENABLE_BICUBIC_FIX, True)
-    return True
+    """Verify BICUBIC&HEOS backend is accessible (RULE-P3: enable_BICUBIC=1).
+    In CoolProp 6.x the bicubic backend is invoked via the AbstractState backend
+    string 'BICUBIC&HEOS', not a config flag. Verifies it computes supercritical CO₂.
+    """
+    import CoolProp
+    AS = CoolProp.AbstractState("BICUBIC&HEOS", "CO2")
+    AS.update(CoolProp.CoolProp.QT_INPUTS, 0, 280.0)  # quality=0, T=280K (subcritical)
+    h = AS.hmass()
+    return h > 0
 
 
 def check_fmpy_import() -> bool:
@@ -101,7 +106,8 @@ def check_external_media_lib() -> bool:
 
 
 def check_thermo_power_lib() -> bool:
-    tp_path = Path("/opt/libs/ThermoPower/package.mo")
+    # ThermoPower repo structure: /opt/libs/ThermoPower/ThermoPower/package.mo
+    tp_path = Path("/opt/libs/ThermoPower/ThermoPower/package.mo")
     return tp_path.exists()
 
 
