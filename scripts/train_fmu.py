@@ -48,7 +48,10 @@ def parse_args():
 
 
 def load_configs(project_root: Path) -> dict:
-    """Merge environment, training, curriculum, and safety YAML configs."""
+    """Merge environment, training, curriculum, and safety YAML configs.
+
+    Produces a flat config dict matching FMUTrainer expectations.
+    """
     import yaml
 
     env_cfg = yaml.safe_load(
@@ -64,12 +67,72 @@ def load_configs(project_root: Path) -> dict:
         (project_root / "configs/safety/constraints.yaml").read_text()
     )
 
-    # Flatten into single config dict (FMUTrainer expects flat config)
-    config = {}
-    config.update(env_cfg.get("environment", env_cfg))   # support nested or flat
-    config.update(ppo_cfg.get("training", ppo_cfg))
-    config["curriculum"] = curriculum_cfg.get("curriculum", curriculum_cfg)
-    config["safety"].update(safety_cfg.get("safety", safety_cfg))
+    # Parse obs_vars from env.yaml observation.variables
+    # Filter out derived variables (fmu_var: null) — computed by env, not read from FMU
+    obs_section = env_cfg["observation"]
+    obs_vars_raw = obs_section["variables"]
+    fmu_obs_vars_raw = [v for v in obs_vars_raw if v.get("fmu_var") is not None]
+    obs_vars = [v["fmu_var"] for v in fmu_obs_vars_raw]
+    obs_bounds = {v["fmu_var"]: (v["min"], v["max"]) for v in fmu_obs_vars_raw}
+
+    # Parse action_vars from env.yaml action.variables
+    act_section = env_cfg["action"]
+    act_vars_raw = act_section["variables"]
+    action_vars = [v["fmu_var"] for v in act_vars_raw]
+    action_config = {
+        v["fmu_var"]: {
+            "min": v["physical_min"],
+            "max": v["physical_max"],
+            "rate": v.get("rate_limit_per_step", v.get("rate_limit", v.get("rate", 1.0))),
+        }
+        for v in act_vars_raw
+    }
+
+    # Safety bounds from constraints.yaml
+    hard = safety_cfg.get("hard_constraints", {})
+    safety = {
+        "T_compressor_inlet_min": hard.get("T_compressor_inlet_min_c", 32.2),
+        "surge_margin_min": hard.get("surge_margin_min_fraction", 0.05),
+    }
+
+    # Episode + normalization from env.yaml
+    episode = env_cfg.get("episode", {})
+    norm = env_cfg.get("normalization", {})
+
+    # PPO from ppo_fmu.yaml
+    ppo = ppo_cfg.get("ppo", {})
+    network = ppo_cfg.get("network", {})
+    training = ppo_cfg.get("training", {})
+
+    # Lagrangian multiplier config
+    lagrangian_cfg = safety_cfg.get("lagrangian", {})
+    constraint_names = ["T_comp_min", "surge_margin_main"]
+
+    config = {
+        # Env
+        "obs_vars": obs_vars,
+        "obs_bounds": obs_bounds,
+        "action_vars": action_vars,
+        "action_config": action_config,
+        "history_steps": obs_section.get("history_steps", 5),
+        "step_size": 5.0,
+        "episode_max_steps": episode.get("max_steps", 720),
+        "reward": env_cfg.get("reward", {}),
+        "safety": safety,
+        "setpoint": {"W_net": 10.0},
+        # Normalization
+        "normalization": norm,
+        # PPO
+        "ppo": ppo,
+        "network": network,
+        # Constraints
+        "constraint_names": constraint_names,
+        "multiplier_lr": lagrangian_cfg.get("multiplier_lr", 1e-3),
+        # Curriculum
+        "curriculum": curriculum_cfg,
+        # Checkpoint
+        "checkpoint_freq": training.get("checkpoint_freq", 100_000),
+    }
     return config
 
 
@@ -101,13 +164,9 @@ def main():
     from sco2rl.simulation.fmu.fmpy_adapter import FMPyAdapter
     from sco2rl.training.fmu_trainer import FMUTrainer
 
-    # Build obs_vars and action_vars from config
-    obs_vars = [v["fmu_var"] for v in config["obs_vars"]] if isinstance(
-        config["obs_vars"][0], dict
-    ) else config["obs_vars"]
-    action_vars = [v["fmu_var"] for v in config["action_vars"]] if isinstance(
-        config["action_vars"][0], dict
-    ) else config["action_vars"]
+    # obs_vars and action_vars are already flat strings from load_configs()
+    obs_vars = config["obs_vars"]
+    action_vars = config["action_vars"]
 
     # FMU factory — called once per VecEnv worker
     def fmu_factory() -> FMPyAdapter:

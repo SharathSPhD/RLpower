@@ -157,8 +157,11 @@ class SCO2FMUEnv(gym.Env):
         self._current_time += self._step_size
         self._step_count += 1
 
-        # 6. Get outputs
-        raw_obs = self._get_raw_obs()
+        # 6. Get outputs (fall back to last valid obs if FMU is in error state)
+        if success:
+            raw_obs = self._get_raw_obs()
+        else:
+            raw_obs = self._history[-1].copy()  # use last valid observation
 
         # 7. Check termination conditions
         terminated, term_reason = self._check_terminated(success, raw_obs)

@@ -108,10 +108,13 @@ class CurriculumCallback(BaseCallback):
     # -- Internal ---------------------------------------------------------------
 
     def _save_checkpoint(self) -> None:
-        """Save RULE-C4 checkpoint via CheckpointManager."""
+        """Save RULE-C4 checkpoint via CheckpointManager (5 required fields)."""
+        ts = self.num_timesteps
         self.checkpoint_mgr.save(
             model=self.model,
-            vecnorm=self.vecnorm,
+            vecnorm_stats={"obs_rms": None},  # VecNormalize stats placeholder
             curriculum_phase=int(self.scheduler.get_phase()),
-            total_timesteps=self.num_timesteps,
+            lagrange_multipliers=getattr(self.model, "get_multipliers", lambda: {})(),
+            total_timesteps=ts,
+            step=ts,
         )

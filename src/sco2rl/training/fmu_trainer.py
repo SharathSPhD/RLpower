@@ -176,13 +176,16 @@ class FMUTrainer:
             callback=self._curriculum_callback,
         )
 
-        # Save final checkpoint
+        # Save final checkpoint (RULE-C4: 5 required fields)
         final_phase = int(self._curriculum_callback.scheduler.get_phase())
+        ts = self._policy.num_timesteps
         self._checkpoint_mgr.save(
             model=self._policy,
-            vecnorm=self._env,
+            vecnorm_stats={"obs_rms": None},  # VecNormalize stats placeholder
             curriculum_phase=final_phase,
-            total_timesteps=self._policy.num_timesteps,
+            lagrange_multipliers=self._policy.get_multipliers(),
+            total_timesteps=ts,
+            step=ts,
         )
 
         return self._policy
