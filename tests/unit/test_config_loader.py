@@ -128,15 +128,15 @@ class TestLoadEnvConfig:
         assert cfg is not None
 
     def test_env_config_obs_dim(self, loader: ConfigLoader, env_config_path: Path) -> None:
-        """Observation dimension is 100 (20 vars × 5 history steps)."""
+        """Observation dimension is 80 (16 vars × 5 history steps, simple_recuperated)."""
         cfg = loader.load_env_config(env_config_path)
-        assert cfg.observation.obs_dim == 100
+        assert cfg.observation.obs_dim == 80
         assert cfg.observation.history_steps == 5
 
     def test_env_config_action_dim(self, loader: ConfigLoader, env_config_path: Path) -> None:
-        """env.yaml declares action_dim = 5 (full recompression action set)."""
+        """env.yaml declares action_dim = 4 (simple_recuperated: no split_ratio)."""
         cfg = loader.load_env_config(env_config_path)
-        assert cfg.action.action_dim == 5
+        assert cfg.action.action_dim == 4
 
     def test_env_config_reward_weights(self, loader: ConfigLoader, env_config_path: Path) -> None:
         """Reward weights are present and positive."""
@@ -153,9 +153,9 @@ class TestLoadEnvConfig:
     def test_env_config_observation_variables_count(
         self, loader: ConfigLoader, env_config_path: Path
     ) -> None:
-        """Exactly 20 observation variables are defined."""
+        """Exactly 16 observation variables are defined (simple_recuperated cycle)."""
         cfg = loader.load_env_config(env_config_path)
-        assert len(cfg.observation.variables) == 20
+        assert len(cfg.observation.variables) == 16
 
     def test_env_config_compressor_inlet_min(
         self, loader: ConfigLoader, env_config_path: Path

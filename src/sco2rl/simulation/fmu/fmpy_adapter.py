@@ -9,12 +9,47 @@ Key design decisions:
 - set_inputs() raises KeyError on unknown variable names (fail-fast).
 - do_step() returns False on fmi2Error / fmi2Fatal (CVODE solver failure).
 - Variable name -> value reference mapping built once at initialize() time.
+- scale_offset: optional dict mapping FMU variable name -> (scale, offset) so
+  get_outputs() returns values in env units (°C, MW, MPa) rather than FMU
+  native units (K, W, Pa).  Applied as: result = raw * scale + offset.
+  Default conversions for simple_recuperated cycle are provided by
+  FMPyAdapter.default_scale_offset().
 """
 from __future__ import annotations
 
 import numpy as np
 
 from sco2rl.simulation.fmu.interface import FMUInterface
+
+# Default unit conversion for the simple_recuperated cycle:
+#   Temperature vars (K → °C):  scale=1.0, offset=-273.15
+#   Power / heat vars (W → MW): scale=1e-6, offset=0.0
+#   Pressure vars (Pa → MPa):   scale=1e-6, offset=0.0
+_SIMPLE_RECUPERATED_SCALE_OFFSET: dict[str, tuple[float, float]] = {
+    # Temperatures
+    "main_compressor.T_inlet_rt":  (1.0,  -273.15),
+    "main_compressor.T_outlet_rt": (1.0,  -273.15),
+    "turbine.T_inlet_rt":          (1.0,  -273.15),
+    "turbine.T_outlet_rt":         (1.0,  -273.15),
+    "recuperator.T_hot_in":        (1.0,  -273.15),
+    "recuperator.T_cold_in":       (1.0,  -273.15),
+    "precooler.T_inlet_rt":        (1.0,  -273.15),
+    "precooler.T_outlet_rt":       (1.0,  -273.15),
+    "regulator.T_inlet_rt":        (1.0,  -273.15),
+    "regulator.T_outlet_rt":       (1.0,  -273.15),
+    # Power / heat transfer
+    "turbine.W_turbine":           (1e-6, 0.0),
+    "main_compressor.W_comp":      (1e-6, 0.0),
+    "recuperator.Q_actual":        (1e-6, 0.0),
+    "recuperator.Q_max_cold":      (1e-6, 0.0),
+    "recuperator.Q_max_hot":       (1e-6, 0.0),
+    # Pressures
+    "main_compressor.p_outlet":    (1e-6, 0.0),
+    "main_compressor.outlet.p":    (1e-6, 0.0),
+    "recuperator.inlet_cold.p":    (1e-6, 0.0),
+    "recuperator.outlet_cold.p":   (1e-6, 0.0),
+    "recuperator.inlet_hot.p":     (1e-6, 0.0),
+}
 
 
 class FMPyAdapter(FMUInterface):
@@ -30,7 +65,17 @@ class FMPyAdapter(FMUInterface):
         Variable names to write as inputs.
     instance_name:
         FMU instance name string.
+    scale_offset:
+        Optional unit-conversion map: FMU variable name -> (scale, offset).
+        Applied as ``result = raw_value * scale + offset``.
+        Pass ``FMPyAdapter.default_scale_offset()`` for simple_recuperated cycle
+        conversions (K→°C, W→MW, Pa→MPa).  Default: no conversion.
     """
+
+    @staticmethod
+    def default_scale_offset() -> dict[str, tuple[float, float]]:
+        """Return the default scale/offset map for the simple_recuperated cycle."""
+        return dict(_SIMPLE_RECUPERATED_SCALE_OFFSET)
 
     def __init__(
         self,
@@ -38,11 +83,13 @@ class FMPyAdapter(FMUInterface):
         obs_vars: list[str],
         action_vars: list[str],
         instance_name: str = "sco2_instance",
+        scale_offset: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         self._fmu_path = fmu_path
         self._obs_vars: list[str] = list(obs_vars)
         self._action_vars: list[str] = list(action_vars)
         self._instance_name = instance_name
+        self._scale_offset: dict[str, tuple[float, float]] = scale_offset or {}
 
         # Populated during initialize()
         self._fmu = None
@@ -141,14 +188,28 @@ class FMPyAdapter(FMUInterface):
             return False
 
     def get_outputs(self) -> dict[str, float]:
-        """Return current output variables as name -> value mapping."""
-        values = self._fmu.getReal(self._obs_vrs)
-        return {name: float(val) for name, val in zip(self._obs_vars, values)}
+        """Return current output variables as name -> value mapping.
+
+        Unit conversion (scale_offset) is applied: result = raw * scale + offset.
+        """
+        raw_values = self._fmu.getReal(self._obs_vrs)
+        result = {}
+        for name, raw in zip(self._obs_vars, raw_values):
+            scale, offset = self._scale_offset.get(name, (1.0, 0.0))
+            result[name] = float(raw) * scale + offset
+        return result
 
     def get_outputs_as_array(self) -> np.ndarray:
-        """Return outputs in obs_vars order as a float32 numpy array."""
-        values = self._fmu.getReal(self._obs_vrs)
-        return np.array(values, dtype=np.float32)
+        """Return outputs in obs_vars order as a float32 numpy array.
+
+        Unit conversion (scale_offset) is applied: result = raw * scale + offset.
+        """
+        raw_values = self._fmu.getReal(self._obs_vrs)
+        converted = []
+        for name, raw in zip(self._obs_vars, raw_values):
+            scale, offset = self._scale_offset.get(name, (1.0, 0.0))
+            converted.append(float(raw) * scale + offset)
+        return np.array(converted, dtype=np.float32)
 
     def reset(self) -> None:
         """Re-initialise FMU by freeInstance() + re-instantiate.
