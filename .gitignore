@@ -63,7 +63,7 @@ htmlcov/
 logs/
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
-.dockerignore
+# .dockerignore is committed (needed for docker build context)
 
 # ─── Secrets ──────────────────────────────────────────────────────────────────
 .env
