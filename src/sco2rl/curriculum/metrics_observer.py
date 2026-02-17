@@ -61,6 +61,10 @@ class MetricsObserver:
             return 0.0
         return sum(self._violations) / len(self._violations)
 
+    def set_advance_threshold(self, threshold: float) -> None:
+        """Update the advancement threshold (called by scheduler on phase advance)."""
+        self._advance_threshold = float(threshold)
+
     def reset(self) -> None:
         """Clear history (called on phase advance)."""
         self._rewards.clear()

@@ -60,10 +60,15 @@ class CurriculumScheduler:
         """Advance to the next phase.
 
         Returns False if already at EMERGENCY_TRIP (no regression, no wrap).
+        Updates observer's advance_threshold to the new phase's configured value.
         """
         if self._phase == CurriculumPhase.EMERGENCY_TRIP:
             return False
         self._phase = CurriculumPhase(int(self._phase) + 1)
+        # Update threshold to the new phase's configured value so per-phase
+        # advancement thresholds from curriculum.yaml are respected.
+        new_cfg = self._configs[self._phase]
+        self._observer.set_advance_threshold(new_cfg.advance_threshold)
         self._observer.reset()
         return True
 

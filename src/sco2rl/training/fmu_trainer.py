@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import numpy as np
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 from sco2rl.environment.sco2_env import SCO2FMUEnv
@@ -85,8 +86,10 @@ class FMUTrainer:
         }
 
         # Build list of env factory functions (one per worker)
+        # Monitor wrapper is required for CurriculumCallback to read episode stats
+        # via info["episode"]["r"] (populated by SB3's Monitor, not VecNormalize).
         def make_single_env():
-            return SCO2FMUEnv(fmu=fmu_factory(), config=env_config)
+            return Monitor(SCO2FMUEnv(fmu=fmu_factory(), config=env_config))
 
         env_fns = [make_single_env for _ in range(n_envs)]
 
@@ -139,12 +142,17 @@ class FMUTrainer:
         )
 
         # CurriculumCallback: wires MetricsObserver + CurriculumScheduler into learn()
+        # curriculum.yaml has nested structure: advancement.* and phases[i].*
         curriculum_cfg = cfg.get("curriculum", {})
+        advancement_cfg = curriculum_cfg.get("advancement", {})
+        phases_cfg = curriculum_cfg.get("phases", [])
+        phase_0_cfg = next((p for p in phases_cfg if p.get("id") == 0), {})
+        require_zero_violations = advancement_cfg.get("require_zero_constraint_violations", False)
         observer_cfg = {
-            "window_size": curriculum_cfg.get("window_size", 50),
-            "advance_threshold": curriculum_cfg.get("advance_threshold", 0.8),
-            "violation_rate_limit": curriculum_cfg.get("violation_rate_limit", 0.05),
-            "min_episodes": curriculum_cfg.get("min_episodes", 50),
+            "window_size": advancement_cfg.get("window_episodes", 50),
+            "advance_threshold": phase_0_cfg.get("advancement_threshold", 8.0),
+            "violation_rate_limit": 0.0 if require_zero_violations else 0.05,
+            "min_episodes": advancement_cfg.get("window_episodes", 50),
         }
         observer = MetricsObserver(config=observer_cfg)
 
