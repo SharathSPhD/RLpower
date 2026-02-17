@@ -130,8 +130,13 @@ class LagrangianPPO:
             Environment to attach (optional; needed for further training).
         """
         multiplier_path = path + "_multipliers.pkl"
-        with open(multiplier_path, "rb") as f:
-            meta = pickle.load(f)
+        if os.path.isfile(multiplier_path):
+            with open(multiplier_path, "rb") as f:
+                meta = pickle.load(f)
+        else:
+            # Pre-fix checkpoint: multipliers pkl was not written (inner PPO
+            # was saved instead of LagrangianPPO). Resume with fresh multipliers.
+            meta = {"multiplier_lr": 1e-3, "constraint_names": [], "multipliers": {}}
 
         obj = cls.__new__(cls)
         obj._multiplier_lr = meta["multiplier_lr"]

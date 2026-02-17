@@ -166,6 +166,7 @@ class FMUTrainer:
             checkpoint_mgr=self._checkpoint_mgr,
             checkpoint_freq=checkpoint_freq,
             vecnorm=self._env,
+            lagrangian_model=self._policy,
             verbose=cfg.get("verbose", 0),
         )
 

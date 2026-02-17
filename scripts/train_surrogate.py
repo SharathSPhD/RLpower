@@ -160,12 +160,12 @@ def load_dataset(dataset_path: str, device: str) -> tuple[torch.Tensor, torch.Te
 
     Returns (x, y, obs_dim, act_dim).
     """
-    from sco2rl.surrogate.trajectory_dataset import TrajectoryDataset
+    import h5py
 
     logger.info("Loading dataset from %s ...", dataset_path)
-    with TrajectoryDataset(filepath=dataset_path, mode="r") as ds:
-        states_np = ds.states[:]   # (N, T, obs_dim)
-        actions_np = ds.actions[:] # (N, T-1, act_dim)
+    with h5py.File(dataset_path, "r") as f:
+        states_np = f["states"][:]   # (N, T, obs_dim)
+        actions_np = f["actions"][:] # (N, T-1, act_dim)
 
     n_traj, t_len, obs_dim = states_np.shape
     _, t_minus_1, act_dim = actions_np.shape
@@ -345,13 +345,15 @@ def run_fidelity_gate(
     report = gate.evaluate(predictions, targets, variable_names)
 
     logger.info(
-        "Fidelity gate: passed=%s  overall_rmse=%.4f  min_r2=%.4f",
+        "Fidelity gate: passed=%s  overall_rmse=%.4f  overall_r2=%.4f",
         report.passed,
         report.overall_rmse_normalized,
-        report.min_r2,
+        report.overall_r2,
     )
     if not report.passed:
-        logger.warning("FIDELITY GATE FAILED: %s", report.failures if hasattr(report, "failures") else "see report")
+        logger.warning("FIDELITY GATE FAILED: overall_rmse=%.4f > threshold=%.4f or r2=%.4f < threshold=%.4f",
+                       report.overall_rmse_normalized, gate_cfg.get("max_rmse_normalized", 0.05),
+                       report.overall_r2, gate_cfg.get("min_r2", 0.97))
     else:
         logger.info("FIDELITY GATE PASSED")
 

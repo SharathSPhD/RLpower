@@ -51,6 +51,7 @@ class CurriculumCallback(BaseCallback):
         checkpoint_mgr: Any,
         checkpoint_freq: int = 10_000,
         vecnorm: Any | None = None,
+        lagrangian_model: Any | None = None,
         verbose: int = 0,
     ) -> None:
         super().__init__(verbose=verbose)
@@ -59,6 +60,9 @@ class CurriculumCallback(BaseCallback):
         self.checkpoint_mgr = checkpoint_mgr
         self.checkpoint_freq = checkpoint_freq
         self.vecnorm = vecnorm
+        # LagrangianPPO wrapper reference; self.model is the INNER SB3 PPO
+        # (set by SB3 during learn()). We need the wrapper to save multipliers.
+        self._lagrangian_model = lagrangian_model
 
         # Track last checkpoint timestep to compute intervals
         self._last_checkpoint_at: int = 0
@@ -108,13 +112,20 @@ class CurriculumCallback(BaseCallback):
     # -- Internal ---------------------------------------------------------------
 
     def _save_checkpoint(self) -> None:
-        """Save RULE-C4 checkpoint via CheckpointManager (5 required fields)."""
+        """Save RULE-C4 checkpoint via CheckpointManager (5 required fields).
+
+        Uses self._lagrangian_model (LagrangianPPO wrapper) when available so
+        that both the .zip and _multipliers.pkl are written.  Falls back to
+        self.model (inner SB3 PPO) for backward-compatibility in unit tests.
+        """
         ts = self.num_timesteps
+        save_model = self._lagrangian_model if self._lagrangian_model is not None else self.model
+        multipliers = getattr(save_model, "get_multipliers", lambda: {})()
         self.checkpoint_mgr.save(
-            model=self.model,
+            model=save_model,
             vecnorm_stats={"obs_rms": None},  # VecNormalize stats placeholder
             curriculum_phase=int(self.scheduler.get_phase()),
-            lagrange_multipliers=getattr(self.model, "get_multipliers", lambda: {})(),
+            lagrange_multipliers=multipliers,
             total_timesteps=ts,
             step=ts,
         )
