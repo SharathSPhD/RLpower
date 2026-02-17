@@ -258,11 +258,20 @@ Dual ascent (primal-dual optimization):
   λ_k ← max(0, λ_k + α · mean_violation_k)    each rollout
 ─────────────────────────────────────────────────────────────
 
-Reward: r(t) = -w₁·||P_demand - P_actual||²/P²_rated
-             + w₂·η(t)/η_design
-             - w₃·||a(t) - a(t-1)||²
-             - Σ_k λ_k · max(0, g_k(s))²
+Reward: r(t) = -w₁·((W_net - W_setpoint)/W_rated)²    [tracking penalty]
+             + w₂·(η(t)/η_design - 1.0)               [efficiency bonus]
+             - w₃·||a(t) - a_midpoint||²/n_act         [smoothness penalty]
+             - Σ_k λ_k · max(0, g_k(s))²               [Lagrangian terms]
 ```
+
+| Term | Weight | Typical range | Effect |
+|------|--------|---------------|--------|
+| Tracking | w₁ = **1.0** | [−∞, 0] | Dominant: penalise load error |
+| Efficiency | w₂ = **0.3** | [−0.3, +0.15] | Bonus above design efficiency |
+| Smoothness | w₃ = **0.1** | [−0.1, 0] | Prevent chattering |
+| Lagrangian | adaptive λ_k | varies | Grow when constraint violated |
+
+Solver failure / catastrophic violation: `r = -100`, episode terminates immediately.
 
 ### 4.2 Constraint Functions
 
@@ -353,27 +362,28 @@ graph TB
 
 ```mermaid
 graph LR
-    P0[Phase 0\nSTEADY STATE\nthresh=0.85\nampl=0.0] --> P1[Phase 1\nLOAD FOLLOW\nthresh=0.80\nampl=0.3]
-    P1 --> P2[Phase 2\nAMBIENT TEMP\nthresh=0.75\nampl=10°C]
-    P2 --> P3[Phase 3\nEAF TRANSIENTS\nthresh=0.70\nampl=200°C]
-    P3 --> P4[Phase 4\nLOAD REJECTION\nthresh=0.65\nampl=50%]
-    P4 --> P5[Phase 5\nCOLD STARTUP\nthresh=0.60\nampl=300°C]
-    P5 --> P6[Phase 6\nEMERGENCY TRIP\nthresh=0.55\nampl=400°C]
+    P0[Phase 0\nSTEADY STATE\nthresh=8.0\nampl=0.0] --> P1[Phase 1\nLOAD FOLLOW\nthresh=6.0\nampl=0.3]
+    P1 --> P2[Phase 2\nAMBIENT TEMP\nthresh=5.5\nampl=10°C]
+    P2 --> P3[Phase 3\nEAF TRANSIENTS\nthresh=4.0\nampl=200°C]
+    P3 --> P4[Phase 4\nLOAD REJECTION\nthresh=3.0\nampl=50%]
+    P4 --> P5[Phase 5\nCOLD STARTUP\nthresh=2.0\nampl=300°C]
+    P5 --> P6[Phase 6\nEMERGENCY TRIP\nthresh=1.0\nampl=400°C]
 ```
 
 **Advancement rule:** Rolling 50-episode window mean reward ≥ threshold AND violation rate ≤ limit.
+Thresholds decrease as scenarios get harder — the agent is rewarded for tolerating controlled violations in extreme phases (e.g. 20% in emergency trip) rather than perfect constraint satisfaction.
 
-| Phase | Scenario | Disturbance | Adv. Threshold | Violation Limit |
-|-------|----------|-------------|----------------|-----------------|
-| 0 | Steady-state optimization | None (0.0) | 0.85 | 2% |
-| 1 | ±30% gradual load following | 0.3 pu step | 0.80 | 5% |
-| 2 | ±10°C ambient temperature | 10°C | 0.75 | 5% |
-| 3 | EAF heat source transients | **200°C ramp** | 0.70 | 10% |
-| 4 | 50% rapid load rejection (30s) | 0.5 pu step | 0.65 | 10% |
-| 5 | Cold startup through critical region | **300°C** | 0.60 | 15% |
-| 6 | Emergency turbine trip recovery | **400°C** | 0.55 | 20% |
+| Phase | Scenario | Disturbance | Adv. Threshold | Violation Limit | Key Physics |
+|-------|----------|-------------|----------------|-----------------|-------------|
+| 0 | Steady-state optimization | None | **8.0** | 2% | Learn valve coordination at design point |
+| 1 | ±30% gradual load following | 0.3 pu ramp | **6.0** | 5% | Fast bypass vs slow inventory tradeoff |
+| 2 | ±10°C ambient temperature | ±10°C sinus | **5.5** | 5% | CO₂ asymmetric sensitivity near Tc |
+| 3 | EAF heat source transients | **200–1200°C cycle** | **4.0** | 10% | **The defining challenge** — 5-min sharp drop |
+| 4 | 50% rapid load rejection (30s) | 0.5 pu step | **3.0** | 10% | Prevent surge on sudden grid disconnect |
+| 5 | Cold startup through critical region | 300K ramp | **2.0** | 15% | Navigate Cp peak (29.6 kJ/kg·K at 35°C/80 bar) |
+| 6 | Emergency turbine trip recovery | 400K + trip | **1.0** | 20% | All control authorities at once |
 
-Phases 3–6 directly simulate the steel WHR operating envelope. Getting through Phase 3 (EAF transients at ±200°C) is the primary research milestone.
+Phases 3–6 directly simulate the steel WHR operating envelope. **Phase 3** (EAF transients) is the primary research milestone: the sharp 5-minute thermal drop requires the agent to pre-position the inventory valve *before* the collapse, a behaviour never achievable by reactive PID control.
 
 ---
 
@@ -432,10 +442,14 @@ Evaluation mode: **autoregressive rollout** (not teacher-forced) against 7,500 h
 ### 7.4 Current Training Progress (live)
 
 ```
-GPU Track (epoch 50/200 as of ~09:44):
-  Epoch 50/200  val_loss=10.3  (started at ~142 at epoch 1)
-  Convergence: 93% loss reduction in 50 epochs
-  Expected completion: ~3h from launch (~12:00)
+GPU Track (epoch 160/200 as of ~10:28):
+  Epoch   1/200  val_loss=152.9  (baseline)
+  Epoch  50/200  val_loss=10.3   (-93%)
+  Epoch 140/200  val_loss= 4.6
+  Epoch 160/200  val_loss= 3.82  (best so far, patience=0)
+  Convergence: 97.5% loss reduction in 160 epochs
+  Expected completion: ~45 min from ~10:28 → ~11:15
+  After: fidelity gate → SKRL PPO on 1,024 GPU envs (~minutes)
 ```
 
 ---
