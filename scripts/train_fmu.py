@@ -190,15 +190,26 @@ def main():
 
     # Resume from checkpoint if requested
     if args.resume:
+        from sco2rl.curriculum.phase import CurriculumPhase
+        from sco2rl.training.lagrangian_ppo import LagrangianPPO
         print(f"[train_fmu] Resuming from checkpoint: {args.resume}")
-        trainer._checkpoint_mgr.load(args.resume, trainer._policy, trainer._env)
+        data = trainer._checkpoint_mgr.load(args.resume)
+        # Restore policy weights + Lagrange multipliers (LagrangianPPO.load() reads
+        # both the .zip and the companion _multipliers.pkl via CheckpointManager.save())
+        trainer._policy = LagrangianPPO.load(data["model_path"], env=trainer._env)
+        # Restore curriculum phase so scheduler picks up where training left off
+        phase = CurriculumPhase(int(data["curriculum_phase"]))
+        trainer._curriculum_callback.scheduler._phase = phase
+        # VecNormalize stats were saved as null placeholder; fresh stats is acceptable
+        # (policy weights are what matter for warm-starting)
+        print(f"[train_fmu] Resumed from phase {phase.name} @ step {data['total_timesteps']:,}")
 
-    print(f"[train_fmu] Starting training...")
-    policy = trainer.train(total_timesteps=args.total_timesteps)
+    print("[train_fmu] Starting training...")
+    trainer.train(total_timesteps=args.total_timesteps)
 
-    print(f"[train_fmu] Training complete. Evaluating...")
+    print("[train_fmu] Training complete. Evaluating...")
     results = trainer.evaluate(n_episodes=10)
-    print(f"[train_fmu] Evaluation results:")
+    print("[train_fmu] Evaluation results:")
     print(f"  mean_reward:    {results['mean_reward']:.4f}")
     print(f"  violation_rate: {results['violation_rate']:.4f}")
     print(f"[train_fmu] Done. Checkpoints in: {args.checkpoint_dir}")
