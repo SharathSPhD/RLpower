@@ -149,14 +149,17 @@ T_turbine_inlet, P_turbine_inlet, T_turbine_outlet, P_turbine_outlet, T_compress
 
 ### 2.4 Action Space (4 continuous actuators)
 
-| Action | Physical Effect | Rate Limit | Range |
-|--------|-----------------|------------|-------|
-| a₀: bypass_valve | Turbine output fraction | ±10%/s | 0–100% |
-| a₁: igv | Inlet guide vane angle | ±5°/s | ±25° |
-| a₂: inventory_valve | Low-side pressure setpoint | ±0.5 MPa/min | 7.2–7.8 MPa |
-| a₃: cooling_flow | Precooler mass flow | ±15%/s | 50–150% nominal |
+| Action | FMU Variable | Physical Range | Rate Limit | Primary Effect |
+|--------|--------------|----------------|------------|----------------|
+| a₀: bypass_valve | `regulator.T_init` (K) | 800–1200 K | 20 K/step | +100K → **W_turbine +1.454 MW** |
+| a₁: igv | `regulator.m_flow_init` (kg/s) | 60–130 kg/s | 5 kg/s/step | +25 kg/s → **W_turbine +3.532 MW** |
+| a₂: inventory_valve | `turbine.p_out` (Pa) | 7–9 MPa | 0.2 MPa/step | +1 MPa → **W_turbine −1.784 MW** |
+| a₃: cooling_flow | `precooler.T_output` (K) | 305.65–315 K | 0.5 K/step | +4.35 K → **T_comp_inlet +4.35°C** |
 
 All actions ∈ [-1, +1] (normalized), mapped to physical range via `SCO2FMUEnv`.
+Rate limits are enforced *every step* — the agent cannot make large actuator jumps even if the network outputs them. This is a hard operational constraint mimicking real valve slew rates.
+
+**Design point (verified FMU):** W_turbine=13.4 MW, W_comp=2.6 MW, **W_net=10.8 MW**, Q_recup=50.6 MW, T_comp_inlet=32.5°C
 
 ---
 
