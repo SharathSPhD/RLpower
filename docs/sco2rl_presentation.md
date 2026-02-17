@@ -289,16 +289,21 @@ Catastrophic violations (T < 31.5°C, P > 23.5 MPa) → episode termination, r =
 
 ```
 Actor (policy network):           Critic (value network):
-  obs (80-dim)                      obs (80-dim)
+  obs (70-dim*)                     obs (70-dim*)
      ↓                                 ↓
-  Linear(80→256) + ReLU            Linear(80→256) + ReLU
+  Linear(70→256) + Tanh            Linear(70→256) + Tanh
      ↓                                 ↓
-  Linear(256→256) + ReLU           Linear(256→256) + ReLU
+  Linear(256→256) + Tanh           Linear(256→256) + Tanh
      ↓                                 ↓
-  Linear(256→4)                    Linear(256→1)
+  Linear(256→128) + Tanh           Linear(256→128) + Tanh
+     ↓                                 ↓
+  Linear(128→4)                    Linear(128→1)
   + tanh → actions [-1,1]          → V(s)
 
-Total params: ~400K
+Total params: ~400K each
+
+* 70-dim = 14 obs vars × 5 history steps (simple_recuperated cycle)
+  VecNormalize normalizes to zero-mean unit-variance before network input
 ```
 
 ### 4.4 PPO Hyperparameters
