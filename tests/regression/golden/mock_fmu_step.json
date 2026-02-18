@@ -1,0 +1,14 @@
+{
+  "inputs": {
+    "bypass_valve_opening": 0.2,
+    "igv_angle_normalized": -0.1,
+    "inventory_valve_opening": 0.05,
+    "cooling_flow_normalized": 0.0
+  },
+  "expected_outputs": {
+    "T_compressor_inlet": 33.025,
+    "W_turbine": 13.475,
+    "W_main_compressor": 3.95,
+    "W_net": 9.025
+  }
+}

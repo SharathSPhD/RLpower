@@ -62,6 +62,7 @@ class CheckpointManager:
         lagrange_multipliers: dict[str, float],
         total_timesteps: int,
         step: int,
+        vecnorm: object | None = None,
     ) -> str:
         """Save checkpoint, return path to the JSON metadata file.
 
@@ -70,7 +71,7 @@ class CheckpointManager:
         model:
             LagrangianPPO instance to save.
         vecnorm_stats:
-            VecNormalize running mean/variance dict (from VecNormalize.get_stats()).
+            Legacy field kept for RULE-C4 schema compat (value stored in JSON).
         curriculum_phase:
             Current curriculum phase (int).
         lagrange_multipliers:
@@ -79,6 +80,11 @@ class CheckpointManager:
             Total environment steps trained so far.
         step:
             Training step counter (used in filename for ordering).
+        vecnorm:
+            Optional VecNormalize instance. When provided, its running
+            mean/variance stats are serialised via VecNormalize.save() so
+            they can be restored on resume.  This is the correct way to
+            persist observation normalization state across interruptions.
         """
         prefix = f"step_{step:08d}_phase_{curriculum_phase}"
         model_path_stem = str(self._run_dir / f"{prefix}_model")
@@ -86,13 +92,20 @@ class CheckpointManager:
         # Save model weights (creates <stem>.zip and <stem>_multipliers.pkl)
         model.save(model_path_stem)
 
-        # Build metadata dict (RULE-C4 all 5 fields)
+        # Persist VecNormalize running stats when the instance is supplied.
+        vecnorm_path: str | None = None
+        if vecnorm is not None:
+            vecnorm_path = str(self._run_dir / f"{prefix}_vecnorm.pkl")
+            vecnorm.save(vecnorm_path)
+
+        # Build metadata dict (RULE-C4 all 5 fields + optional vecnorm_path)
         checkpoint_data = {
-            "model_path": model_path_stem,          # field 1
-            "vecnorm_stats": vecnorm_stats,          # field 2
-            "curriculum_phase": curriculum_phase,    # field 3
+            "model_path": model_path_stem,                 # field 1
+            "vecnorm_stats": vecnorm_stats,                # field 2 (legacy)
+            "vecnorm_path": vecnorm_path,                  # real stats file path
+            "curriculum_phase": curriculum_phase,          # field 3
             "lagrange_multipliers": lagrange_multipliers,  # field 4
-            "total_timesteps": total_timesteps,      # field 5
+            "total_timesteps": total_timesteps,            # field 5
             "step": step,
         }
 

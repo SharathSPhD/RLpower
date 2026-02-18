@@ -82,16 +82,40 @@ class FineTuner:
 
         original_timesteps: int = int(meta.get("total_timesteps", 0))
         self._curriculum_phase = int(meta.get("curriculum_phase", 0))
+
+        # ── 2. Build training environment ─────────────────────────────────
+        env = self._env_factory()
+        vec_env = DummyVecEnv([lambda: env])
+
+        # Support both SB3 checkpoints (model_path) and SKRL checkpoints
+        # (model_weights). SKRL manifests are bridged into an SB3 RULE-C4
+        # checkpoint before fine-tuning.
+        if "model_path" not in meta:
+            if "model_weights" not in meta:
+                raise ValueError(
+                    "Checkpoint must contain either 'model_path' (SB3) "
+                    "or 'model_weights' (SKRL)."
+                )
+            from sco2rl.training.checkpoint_bridge import convert_skrl_to_sb3_checkpoint
+
+            bridge_dir = os.path.join(checkpoint_dir, "bridge")
+            bridged_checkpoint = convert_skrl_to_sb3_checkpoint(
+                skrl_checkpoint_path=checkpoint_path,
+                output_dir=bridge_dir,
+                env=vec_env,
+                model_stem="skrl_to_sb3_bridge",
+            )
+            with open(bridged_checkpoint, "r") as f:
+                meta = json.load(f)
+            original_timesteps = int(meta.get("total_timesteps", original_timesteps))
+            self._curriculum_phase = int(meta.get("curriculum_phase", self._curriculum_phase))
+
         weights_path: str = meta["model_path"]
         # SB3 saves with .zip; handle both with and without extension
         if not weights_path.endswith(".zip"):
             weights_path_zip = weights_path + ".zip"
         else:
             weights_path_zip = weights_path
-
-        # ── 2. Build training environment ─────────────────────────────────
-        env = self._env_factory()
-        vec_env = DummyVecEnv([lambda: env])
 
         # ── 3. Load SB3 PPO weights and set fine-tuning LR ────────────────
         # set_env allows reuse of weights on a new env

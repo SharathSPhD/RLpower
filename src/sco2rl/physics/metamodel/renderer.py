@@ -63,6 +63,8 @@ class MoFileRenderer:
             self._render_model_header(model),
             self._render_imports(model),
             self._render_fluid_medium(model),
+            self._render_controller_wrapper_models(model),
+            self._render_controller_interface_declarations(model),
             self._render_component_declarations(model),
             self._render_equation_section(model),
             self._render_connect_equations(model),
@@ -139,7 +141,7 @@ class MoFileRenderer:
         i = self._INDENT
         lines = [f"{i}// --- Component declarations ---"]
         for name, spec in model.components.items():
-            lines.append(self._render_single_component(name, spec, i))
+            lines.append(self._render_single_component(name, spec, i, model))
         return "\n".join(lines)
 
     def _render_single_component(
@@ -147,10 +149,12 @@ class MoFileRenderer:
         name: str,
         spec: ComponentSpec,
         indent: str,
+        model: CycleModel,
     ) -> str:
         """Render a single Modelica component declaration with parameters."""
+        modelica_type = self._component_type_for_render(name, spec, model)
         if not spec.params:
-            return f"{indent}{spec.modelica_type} {name};"
+            return f"{indent}{modelica_type} {name};"
 
         param_lines = []
         param_items = list(spec.params.items())
@@ -160,7 +164,7 @@ class MoFileRenderer:
                 f"{indent}{indent}{param_name}={_format_param_value(param_value)}{comma}"
             )
 
-        decl_lines = [f"{indent}{spec.modelica_type} {name}("]
+        decl_lines = [f"{indent}{modelica_type} {name}("]
         decl_lines.extend(param_lines)
         decl_lines.append(f"{indent});")
         return "\n".join(decl_lines)
@@ -172,13 +176,133 @@ class MoFileRenderer:
     def _render_connect_equations(self, model: CycleModel) -> str:
         """Render all connect() equations for the model's connections."""
         i = self._INDENT
-        if not model.connections:
-            return f"{i}// No connections defined"
-
         lines = [f"{i}// --- Connections ---"]
         for conn in model.connections:
             lines.append(f"{i}connect({conn.from_port}, {conn.to_port});")
+        control_lines = self._render_control_connections(model)
+        lines.extend(control_lines)
+        if len(lines) == 1:
+            lines.append(f"{i}// No connections defined")
         return "\n".join(lines)
+
+    def _render_controller_wrapper_models(self, model: CycleModel) -> str:
+        """Render lightweight controller-aware wrapper component definitions."""
+        mode = model.controller_config.get("mode", "none")
+        if mode not in {"rl_external", "pid_baseline"}:
+            return ""
+
+        i = self._INDENT
+        return "\n".join([
+            "",
+            f"{i}// --- Controller/actuator wrappers ---",
+            f"{i}model ControlledRegulator",
+            f"{i}{i}extends Steps.Components.Regulator;",
+            f"{i}{i}Modelica.Blocks.Interfaces.RealInput T_set;",
+            f"{i}{i}Modelica.Blocks.Interfaces.RealInput mdot_set;",
+            f"{i}{i}equation",
+            f"{i}{i}{i}T_init = T_set;",
+            f"{i}{i}{i}m_flow_init = mdot_set;",
+            f"{i}end ControlledRegulator;",
+            "",
+            f"{i}model ControlledTurbine",
+            f"{i}{i}extends Steps.Components.Turbine;",
+            f"{i}{i}Modelica.Blocks.Interfaces.RealInput p_out_set;",
+            f"{i}{i}equation",
+            f"{i}{i}{i}p_out = p_out_set;",
+            f"{i}end ControlledTurbine;",
+            "",
+            f"{i}model ControlledFanCooler",
+            f"{i}{i}extends Steps.Components.FanCooler;",
+            f"{i}{i}Modelica.Blocks.Interfaces.RealInput T_out_set;",
+            f"{i}{i}equation",
+            f"{i}{i}{i}T_output = T_out_set;",
+            f"{i}end ControlledFanCooler;",
+            "",
+        ])
+
+    def _render_controller_interface_declarations(self, model: CycleModel) -> str:
+        """Declare controller I/O interfaces for swappable control policies."""
+        mode = model.controller_config.get("mode", "none")
+        if mode not in {"rl_external", "pid_baseline"}:
+            return ""
+
+        i = self._INDENT
+        n_commands = int(model.controller_config.get("n_commands", 4))
+        n_measurements = int(model.controller_config.get("n_measurements", 14))
+        return "\n".join([
+            f"{i}// --- Controller interface ({mode}) ---",
+            f"{i}Modelica.Blocks.Interfaces.RealInput commands[{n_commands}];",
+            f"{i}Modelica.Blocks.Interfaces.RealOutput measurements[{n_measurements}];",
+            "",
+        ])
+
+    def _component_type_for_render(
+        self,
+        name: str,
+        spec: ComponentSpec,
+        model: CycleModel,
+    ) -> str:
+        """Swap core components for controlled wrappers when enabled."""
+        mode = model.controller_config.get("mode", "none")
+        if mode not in {"rl_external", "pid_baseline"}:
+            return spec.modelica_type
+
+        wrapper_map = {
+            ("regulator", "Steps.Components.Regulator"): "ControlledRegulator",
+            ("turbine", "Steps.Components.Turbine"): "ControlledTurbine",
+            ("precooler", "Steps.Components.FanCooler"): "ControlledFanCooler",
+        }
+        return wrapper_map.get((name, spec.modelica_type), spec.modelica_type)
+
+    def _render_control_connections(self, model: CycleModel) -> list[str]:
+        """Connect top-level controller commands to actuator wrapper inputs."""
+        mode = model.controller_config.get("mode", "none")
+        if mode not in {"rl_external", "pid_baseline"}:
+            return []
+
+        i = self._INDENT
+        lines: list[str] = [f"{i}// --- Control links ---"]
+        if "regulator" in model.components:
+            lines.append(f"{i}connect(commands[1], regulator.T_set);")
+            lines.append(f"{i}connect(commands[2], regulator.mdot_set);")
+        if "turbine" in model.components:
+            lines.append(f"{i}connect(commands[3], turbine.p_out_set);")
+        if "precooler" in model.components:
+            lines.append(f"{i}connect(commands[4], precooler.T_out_set);")
+
+        n_measurements = int(model.controller_config.get("n_measurements", 14))
+        if n_measurements > 0:
+            lines.append(f"{i}// Measurement wiring (simple_recuperated default order)")
+            measurement_exprs = self._measurement_expressions(model)
+            for idx in range(1, n_measurements + 1):
+                expr = measurement_exprs[idx - 1] if idx - 1 < len(measurement_exprs) else "0.0"
+                lines.append(f"{i}measurements[{idx}] = {expr};")
+        return lines
+
+    @staticmethod
+    def _measurement_expressions(model: CycleModel) -> list[str]:
+        """Return top-level measurement expressions for controller output vector."""
+        has = set(model.components.keys())
+
+        def _maybe(component: str, expr: str, fallback: str = "0.0") -> str:
+            return expr if component in has else fallback
+
+        return [
+            _maybe("main_compressor", "main_compressor.T_inlet_rt"),
+            _maybe("main_compressor", "main_compressor.T_outlet_rt"),
+            _maybe("turbine", "turbine.T_inlet_rt"),
+            _maybe("turbine", "turbine.T_outlet_rt"),
+            _maybe("recuperator", "recuperator.T_hot_in"),
+            _maybe("recuperator", "recuperator.T_cold_in"),
+            _maybe("precooler", "precooler.T_inlet_rt"),
+            _maybe("precooler", "precooler.T_outlet_rt"),
+            _maybe("turbine", "turbine.W_turbine"),
+            _maybe("main_compressor", "main_compressor.W_comp"),
+            _maybe("main_compressor", "main_compressor.eta"),
+            _maybe("recuperator", "recuperator.eta"),
+            _maybe("recuperator", "recuperator.Q_actual"),
+            _maybe("main_compressor", "main_compressor.p_outlet"),
+        ]
 
     def _render_model_footer(self, model: CycleModel) -> str:
         """Render the closing 'end Name;' line."""

@@ -76,6 +76,27 @@ TEST_CONFIG = {
     "tensorboard_log": "artifacts/logs/surrogate_ppo",
     "seed": 42,
     "env_config": {
+        "obs_vars": OBS_VARS,
+        "obs_bounds": {v: (0.0, 1.0) for v in OBS_VARS},
+        "action_vars": ACTION_VARS,
+        "action_config": {
+            v: {"phys_min": 0.0, "phys_max": 1.0, "rate_limit": 0.05}
+            for v in ACTION_VARS
+        },
+        "obs_design_point": {v: 0.5 for v in OBS_VARS},
+        "reward": {
+            "w_tracking": 1.0,
+            "w_efficiency": 0.3,
+            "w_smoothness": 0.1,
+            "rated_power_mw": 10.0,
+            "design_efficiency": 0.40,
+            "terminal_failure_reward": -100.0,
+        },
+        "safety": {
+            "T_comp_inlet_min_c": -999.0,
+            "surge_margin_min": -999.0,
+        },
+        "setpoint": {"W_net_setpoint": 5.0},
         "history_steps": 1,
         "episode_max_steps": 20,
     },
@@ -182,3 +203,27 @@ class TestTrain:
         assert "mean_reward" in metrics, "metrics dict must contain mean_reward"
         assert "total_timesteps" in metrics, "metrics dict must contain total_timesteps"
         assert metrics["total_timesteps"] > 0, "total_timesteps must be > 0"
+
+    def test_train_converts_transition_budget_to_trainer_steps(self, stub_model, tmp_path):
+        """Default path (batched env) interprets timesteps as transitions."""
+        from sco2rl.surrogate.surrogate_trainer import SurrogateTrainer
+
+        cfg = dict(TEST_CONFIG)
+        cfg["n_envs"] = 4
+        cfg["total_timesteps"] = 64
+        cfg["rollout_steps"] = 8
+        cfg["learning_epochs"] = 1
+        cfg["mini_batches"] = 1
+        cfg["checkpoint_dir"] = str(tmp_path / "checkpoints_batched")
+        cfg["tensorboard_log"] = str(tmp_path / "logs_batched")
+
+        trainer = SurrogateTrainer(
+            surrogate_model=stub_model,
+            config=cfg,
+            env_class=None,  # use TorchBatchedSurrogateEnv path
+            device="cpu",
+        )
+        trainer.build_envs()
+        trainer.build_agent()
+        metrics = trainer.train(timesteps=64)
+        assert metrics["total_timesteps"] == 64

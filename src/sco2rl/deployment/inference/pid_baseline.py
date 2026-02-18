@@ -30,6 +30,8 @@ class PIDBaseline:
         self._cfg = config
         self._obs_vars = config["obs_vars"]
         self._action_vars = config["action_vars"]
+        self._n_obs = int(config.get("n_obs", len(self._obs_vars)))
+        self._history_steps = int(config.get("history_steps", 1))
         gains = config["gains"]
         setpoints = config["setpoints"]
         self._meas_idx = config["measurement_indices"]
@@ -57,10 +59,14 @@ class PIDBaseline:
     def predict(self, obs: np.ndarray, deterministic: bool = True):
         if obs.ndim == 2:
             obs = obs[0]
+        latest_offset = max(self._history_steps - 1, 0) * self._n_obs
         actions = []
         for act_name in self._action_vars:
             meas_idx = self._meas_idx[act_name]
-            measurement = float(obs[meas_idx])
+            idx = latest_offset + meas_idx
+            if idx >= len(obs):
+                idx = min(meas_idx, len(obs) - 1)
+            measurement = float(obs[idx])
             ctrl = self._controllers[act_name]
             actions.append(ctrl.compute(measurement, self._dt))
         return np.array(actions, dtype=np.float32), None

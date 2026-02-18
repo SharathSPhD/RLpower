@@ -21,7 +21,51 @@ from typing import Any
 
 import numpy as np
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import VecEnv
+from stable_baselines3.common.vec_env import VecEnv, VecEnvWrapper
+
+
+class _LagrangianPenaltyVecEnv(VecEnvWrapper):
+    """VecEnv wrapper that injects Lagrangian penalties into step rewards.
+
+    The wrapped environment is expected to emit, per env step, an info dict key
+    ``constraint_violations`` containing a mapping:
+
+        {constraint_name: non_negative_violation_magnitude}
+
+    Reward shaping applied at each step:
+
+        r_lagrangian = r_env - sum_i(lambda_i * max(0, violation_i))
+
+    Notes
+    -----
+    - ``multipliers`` is passed by reference so updates from dual-ascent are
+      reflected immediately in reward shaping (no sync call required).
+    - Unknown constraint names are ignored.
+    """
+
+    def __init__(self, venv: VecEnv, multipliers: dict[str, float]) -> None:
+        super().__init__(venv)
+        self._multipliers = multipliers
+
+    def reset(self) -> np.ndarray:
+        return self.venv.reset()
+
+    def step_wait(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict[str, Any]]]:
+        obs, rewards, dones, infos = self.venv.step_wait()
+        shaped_rewards = rewards.astype(np.float32, copy=True)
+        for env_idx, info in enumerate(infos):
+            violations = info.get("constraint_violations", {})
+            if not isinstance(violations, dict):
+                continue
+            penalty = 0.0
+            for name, violation in violations.items():
+                lam = float(self._multipliers.get(str(name), 0.0))
+                if lam <= 0.0:
+                    continue
+                penalty += lam * max(0.0, float(violation))
+            shaped_rewards[env_idx] = float(shaped_rewards[env_idx] - penalty)
+            info["lagrangian_penalty"] = float(penalty)
+        return obs, shaped_rewards, dones, infos
 
 
 class LagrangianPPO:
@@ -53,8 +97,14 @@ class LagrangianPPO:
         self._multipliers: dict[str, float] = {
             name: 0.0 for name in self._constraint_names
         }
-        # Build inner SB3 PPO
-        self._ppo = PPO(env=env, **ppo_kwargs)
+        self._penalty_env: VecEnv | Any
+        if isinstance(env, VecEnv):
+            self._penalty_env = _LagrangianPenaltyVecEnv(venv=env, multipliers=self._multipliers)
+        else:
+            # Fallback for unusual call-sites that pass a non-VecEnv env.
+            self._penalty_env = env
+        # Build inner SB3 PPO (receives Lagrangian-shaped rewards from wrapper)
+        self._ppo = PPO(env=self._penalty_env, **ppo_kwargs)
 
     # -- Multiplier management ------------------------------------------------
 
@@ -79,6 +129,16 @@ class LagrangianPPO:
     def get_multipliers(self) -> dict[str, float]:
         """Return a copy of current lambda values."""
         return dict(self._multipliers)
+
+    def compute_lagrangian_penalty(self, violations: dict[str, float]) -> float:
+        """Compute ``sum_i(lambda_i * max(0, violation_i))`` for one step."""
+        penalty = 0.0
+        for name, violation in violations.items():
+            lam = float(self._multipliers.get(name, 0.0))
+            if lam <= 0.0:
+                continue
+            penalty += lam * max(0.0, float(violation))
+        return float(penalty)
 
     # -- Training / inference --------------------------------------------------
 
@@ -142,7 +202,11 @@ class LagrangianPPO:
         obj._multiplier_lr = meta["multiplier_lr"]
         obj._constraint_names = meta["constraint_names"]
         obj._multipliers = meta["multipliers"]
-        obj._ppo = PPO.load(path, env=env)
+        if isinstance(env, VecEnv):
+            obj._penalty_env = _LagrangianPenaltyVecEnv(venv=env, multipliers=obj._multipliers)
+        else:
+            obj._penalty_env = env
+        obj._ppo = PPO.load(path, env=obj._penalty_env)
         return obj
 
     # -- Accessors for CheckpointManager / FMUTrainer -------------------------

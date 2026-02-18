@@ -1,0 +1,9 @@
+{
+  "n_eval_episodes": 5,
+  "expected": {
+    "mean_reward": -91.907368753469,
+    "std_reward": 0.0,
+    "mean_episode_length": 7.0,
+    "violation_rate": 0.14285714285714285
+  }
+}

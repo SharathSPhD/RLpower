@@ -42,6 +42,7 @@ class CycleModel:
     components: dict[str, ComponentSpec]
     connections: list[ConnectionSpec]
     topology: str
+    controller_config: dict[str, Any] = field(default_factory=dict)
 
 
 # ─── Exception ────────────────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ class SCO2CycleBuilder:
         self._name: str = "SCO2_WHR"
         self._package: str = "SCO2RecuperatedCycle"
         self._fluid_config: dict[str, Any] = {}
+        self._controller_config: dict[str, Any] = {"mode": "none"}
 
     # ── Fluent methods ────────────────────────────────────────────────────────
 
@@ -178,6 +180,7 @@ class SCO2CycleBuilder:
             components=active_components,
             connections=list(self._connections),
             topology=self._topology,
+            controller_config=dict(self._controller_config),
         )
 
     # ── Class method constructor ──────────────────────────────────────────────
@@ -209,6 +212,7 @@ class SCO2CycleBuilder:
         # ── Topology (RULE-D3) ────────────────────────────────────────────
         topology_cfg = config.get("topology", {})
         builder._topology = topology_cfg.get("type", "simple_recuperated")
+        builder._controller_config = dict(config.get("controller", {"mode": "none"}))
 
         # ── Build all ComponentSpecs, then filter for active topology ─────
         all_component_cfgs: dict[str, Any] = config.get("components", {})

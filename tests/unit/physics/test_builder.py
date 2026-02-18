@@ -250,3 +250,15 @@ class TestFromConfig:
         """from_config() populates connections from flow_paths config."""
         builder = SCO2CycleBuilder.from_config(model_config)
         assert len(builder._connections) > 0
+
+    def test_builder_from_config_reads_controller_config(self, model_config):
+        """from_config() carries controller config through to CycleModel."""
+        model_config["controller"] = {
+            "mode": "rl_external",
+            "n_commands": 4,
+            "n_measurements": 14,
+        }
+        builder = SCO2CycleBuilder.from_config(model_config)
+        cycle = builder.build()
+        assert cycle.controller_config["mode"] == "rl_external"
+        assert cycle.controller_config["n_commands"] == 4

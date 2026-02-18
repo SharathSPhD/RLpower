@@ -25,7 +25,13 @@ class TrajectoryCollector:
         Random seed for action perturbation reproducibility.
     """
 
-    def __init__(self, env: SCO2FMUEnv, config: dict, seed: int = 42) -> None:
+    def __init__(
+        self,
+        env: SCO2FMUEnv,
+        config: dict,
+        seed: int = 42,
+        raw_obs_dim: int | None = None,
+    ) -> None:
         self._env = env
         self._cfg = config
         self._traj_len: int = int(config["trajectory_length_steps"])
@@ -34,7 +40,16 @@ class TrajectoryCollector:
         self._clip: float = float(self._perturb_cfg["clip"])
         self._rng = np.random.default_rng(seed)
         self._n_act: int = env.action_space.shape[0]
-        self._n_obs_dim: int = env.observation_space.shape[0]
+        # Store only the current raw state (not history-stacked observations).
+        if raw_obs_dim is None:
+            raw_obs_dim = len(getattr(env, "_obs_vars", [])) or env.observation_space.shape[0]
+        self._raw_obs_dim: int = int(raw_obs_dim)
+
+    def _extract_current_raw_obs(self, obs: np.ndarray) -> np.ndarray:
+        """Return current raw state from potentially history-stacked observation."""
+        if obs.shape[0] <= self._raw_obs_dim:
+            return obs.astype(np.float32, copy=False)
+        return obs[-self._raw_obs_dim :].astype(np.float32, copy=False)
 
     def collect_trajectory(self, sample: np.ndarray) -> dict:
         """Run one episode with the given parameter sample.
@@ -53,20 +68,17 @@ class TrajectoryCollector:
         """
         obs, _ = self._env.reset()
 
-        # Number of raw obs vars (strip history dimension)
-        obs_space_dim = self._n_obs_dim  # may include history
-        # For collector we store raw obs per step = obs_space_dim (full obs vector)
-        n_obs = obs_space_dim
+        n_obs = self._raw_obs_dim
 
         states = np.zeros((self._traj_len, n_obs), dtype=np.float32)
         actions = np.zeros((self._traj_len - 1, self._n_act), dtype=np.float32)
 
         # Record initial state
-        states[0] = obs.astype(np.float32)
+        states[0] = self._extract_current_raw_obs(obs)
 
         # Current action in normalized [-1, 1] space, starts at zero (mid-range)
         current_action = np.zeros(self._n_act, dtype=np.float32)
-        last_valid_obs = obs.astype(np.float32)
+        last_valid_obs = states[0].copy()
 
         actual_steps = 0
         for step in range(self._traj_len - 1):
@@ -90,7 +102,7 @@ class TrajectoryCollector:
                     actions[fill_step] = action
                 break
             else:
-                last_valid_obs = obs.astype(np.float32)
+                last_valid_obs = self._extract_current_raw_obs(obs)
                 if step + 1 < self._traj_len:
                     states[step + 1] = last_valid_obs
 

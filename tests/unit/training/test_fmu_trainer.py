@@ -149,7 +149,7 @@ class TestFMUTrainerSetup:
         assert trainer_setup._curriculum_callback is not None
 
     def test_setup_factory_called_n_envs_times(self, trainer):
-        """setup(fmu_factory, n_envs=2) calls factory twice (DummyVecEnv with 2 envs)."""
+        """setup(fmu_factory, n_envs=1) calls factory once."""
         call_count = {"n": 0}
 
         def counting_factory():
@@ -163,9 +163,8 @@ class TestFMUTrainerSetup:
             fmu.initialize(start_time=0.0, stop_time=1000.0, step_size=5.0)
             return fmu
 
-        trainer.setup(fmu_factory=counting_factory, n_envs=2)
-        # DummyVecEnv calls factory once per env
-        assert call_count["n"] == 2
+        trainer.setup(fmu_factory=counting_factory, n_envs=1)
+        assert call_count["n"] == 1
 
 
 class TestFMUTrainerEvaluate:

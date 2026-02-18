@@ -151,3 +151,43 @@ def test_action_scaling_applied(env):
     assert not np.allclose(obs_low, obs_high), (
         "action=-1 and action=+1 produced identical observations — scaling not applied"
     )
+
+
+def test_step_info_contains_constraint_fields(env):
+    env.reset()
+    action = env.action_space.sample()
+    _, _, terminated, truncated, info = env.step(action)
+    assert "constraint_violations" in info
+    assert "constraint_violation_step" in info
+    assert isinstance(info["constraint_violations"], dict)
+    if terminated or truncated:
+        assert "constraint_violation" in info
+
+
+def test_smoothness_penalty_uses_physical_action_delta():
+    cfg = dict(ENV_CONFIG)
+    cfg["action_config"] = {
+        ACTION_VARS[0]: {"phys_min": 0.0, "phys_max": 2.0, "rate_limit": 10.0},
+        ACTION_VARS[1]: {"phys_min": 0.0, "phys_max": 1.0, "rate_limit": 10.0},
+        ACTION_VARS[2]: {"phys_min": 0.0, "phys_max": 1.0, "rate_limit": 10.0},
+        ACTION_VARS[3]: {"phys_min": 0.0, "phys_max": 1.0, "rate_limit": 10.0},
+    }
+    cfg["reward"] = {
+        "w_tracking": 0.0,
+        "w_efficiency": 0.0,
+        "w_smoothness": 1.0,
+        "rated_power_mw": 10.0,
+        "design_efficiency": 0.40,
+        "terminal_failure_reward": -100.0,
+    }
+    model = FNO1d(**SMALL_FNO_CONFIG)
+    env = SurrogateEnv(model=model, config=cfg, device="cpu")
+    state = np.array([0.5] * N_OBS, dtype=np.float32)
+    # Delta only on first action: 1.0 physical units over a 2.0 range => normalized delta 0.5.
+    reward = env._compute_reward(
+        state=state,
+        phys_action=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        previous_phys_action=np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32),
+    )
+    expected = -(0.5**2) / 4.0  # mean over 4 actions
+    assert reward == pytest.approx(expected, abs=1e-6)

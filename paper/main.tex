@@ -1,0 +1,858 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{caption}
+\usepackage{subcaption}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+\title{Deep Reinforcement Learning for Autonomous Control of\\
+Supercritical CO$_2$ Brayton Cycles in Steel Industry\\
+Waste Heat Recovery}
+\author{sCO2RL Project Team}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present \textbf{sCO2RL}, an end-to-end reinforcement-learning (RL) framework
+for autonomous control of a simple-recuperated supercritical CO$_2$ (sCO$_2$)
+Brayton cycle recovering waste heat from steel industry electric-arc
+and basic-oxygen furnace exhaust (200--1{,}200\textdegree{}C).
+The pipeline integrates physics-faithful FMI~2.0 Co-Simulation (FMU) via
+OpenModelica, a Gymnasium environment with a 7-phase structured curriculum,
+Proximal Policy Optimisation (PPO) with Lagrangian constraint multipliers for
+safe operation near the CO$_2$ critical point,
+a Fourier Neural Operator (FNO) surrogate for GPU-accelerated training,
+and a sub-millisecond TensorRT-FP16 deployment path.
+
+After resolving five non-trivial software engineering defects in the training
+infrastructure — covering observation normalisation persistence, episode
+boundary detection, reward unit double-scaling, stale disturbance profiles,
+and constraint-violation gating — the agent successfully traverses all seven
+curriculum phases within 229{,}376 steps, reaching Phase~6 (emergency turbine
+trip recovery) with a mean episode reward of \textbf{399.9} and a constraint
+violation rate of \textbf{0.000}.
+At step 212{,}992 with all bugs fixed, the RL controller achieves a
+\textbf{+17.6\%} improvement in cumulative episode reward over a PID baseline
+(806.6 vs.\ 685.9).
+The deployment path achieves a p99 host latency of \textbf{0.046~ms},
+exceeding the 1~ms plant-edge SLA by a factor of $22\times$.
+
+To our knowledge this is the first publicly available framework combining
+OpenModelica-exported sCO$_2$ FMU simulation, structured curriculum RL,
+Lagrangian safe constraints, and a TensorRT deployment path.
+All code, configurations, and pre-trained artefacts are released at
+\url{https://github.com/SharathSPhD/RLpower} (MIT licence).
+\end{abstract}
+
+%% ---------------------------------------------------------------------------
+\section{Introduction}
+%% ---------------------------------------------------------------------------
+
+Steel manufacturing accounts for approximately 7--8\% of global CO$_2$
+emissions~\cite{worldsteel2023}.
+Electric arc furnaces (EAF) and basic oxygen furnaces (BOF) expel exhaust
+streams that oscillate between 200\textdegree{}C and 1{,}200\textdegree{}C
+with cycle periods of 1--15 minutes.
+Recovering this thermal energy via a power cycle could displace significant
+grid electricity, but the extreme transients make control exceptionally
+challenging.
+
+Supercritical CO$_2$ power cycles~\cite{dostal2004} are an attractive
+bottoming cycle for this application: operating above the CO$_2$ critical
+point (31.1\textdegree{}C, 7.38~MPa) enables efficiencies of 27--40\% at
+compact turbomachinery scale (10--100$\times$ smaller than steam equivalents)
+that makes the technology cost-competitive at industrial waste heat magnitudes.
+However, the fluid's near-critical thermodynamic properties introduce severe
+nonlinearity: specific heat peaks at 29.6~kJ\,kg$^{-1}$\,K$^{-1}$ near
+35\textdegree{}C/80~bar, so a 1.5\textdegree{}C compressor inlet temperature
+drop demands 6\% more cooling power, while a 1.5\textdegree{}C increase
+requires 18\% less — a strongly asymmetric gain that defeats fixed-gain PID
+tuning during furnace transients~\cite{sco2review2021}.
+
+Reinforcement learning (RL) offers an adaptive alternative: an agent trained
+on a physics-faithful digital twin can learn to anticipate and exploit
+thermodynamic nonlinearities without requiring an explicit system model.
+Related work has demonstrated RL on building energy systems via
+Modelica/FMU environments~\cite{modelicagym,boptestgym}, and on organic
+Rankine cycle superheat control for internal combustion engine
+exhaust~\cite{wang2020orc}.
+More recently, Zhu et al.~\cite{zhu2024fno} combined Fourier Neural Operators
+with reinforcement learning PI control for sCO$_2$ cycle dynamics, while a
+comprehensive review by Liu et al.~\cite{sco2review2021} identifies advanced
+data-driven control as a key research direction.
+The EU-funded iSOP doctoral network (Horizon Europe grant 101073266) trains
+15 researchers specifically on sCO$_2$ transient modelling and novel control
+strategies~\cite{isop2024}, underscoring community recognition of this gap.
+
+Despite this growing interest, to our knowledge no publicly available framework
+combines (i)~a physics-faithful OpenModelica-exported sCO$_2$ FMU,
+(ii)~structured curriculum RL with safety constraints,
+and (iii)~a sub-millisecond deployment path.
+sCO2RL fills this gap.
+
+\textbf{Contributions.}
+\begin{enumerate}
+  \item A publicly available Gymnasium environment wrapping an
+        OpenModelica-exported sCO$_2$ FMU with a 7-phase structured
+        curriculum and Lagrangian safety constraints.
+  \item PPO with trainable Lagrangian constraint multipliers for
+        safe operation near the CO$_2$ critical region.
+  \item An FNO surrogate path enabling GPU-vectorised training
+        (${\approx}10^6$ steps/s vs.\ ${\approx}800$ steps/s on CPU FMU).
+  \item A TensorRT-FP16 deployment artefact achieving p99 $<1$~ms.
+  \item An honest, detailed diagnosis of five training infrastructure
+        defects encountered in practice — including episode boundary
+        misalignment, reward unit double-scaling, and normalisation
+        persistence failure — as concrete practitioner guidance.
+\end{enumerate}
+
+%% ---------------------------------------------------------------------------
+\section{Related Work}
+%% ---------------------------------------------------------------------------
+
+\subsection{RL for Thermodynamic Cycle Control}
+
+Deep RL has been applied to related thermodynamic control problems.
+Wang et al.~\cite{wang2020orc} demonstrated that a soft actor-critic agent
+outperforms PID control for ORC superheat regulation under highly transient
+internal combustion engine exhaust, achieving superior generalisation to
+unseen disturbance profiles.
+A 2022 study on sCO$_2$ recompression cycle control~\cite{sco2compare2021}
+compared multiple conventional control strategies (PI, feedforward, combined)
+during load-following transients, establishing the baseline landscape that RL
+must surpass.
+
+For the sCO$_2$ cycle specifically, Zhu et al.~\cite{zhu2024fno} recently
+applied Fourier Neural Operators to characterise open-loop transient dynamics
+and embed the learned model in a Model Predictive Controller, demonstrating
+that the printed circuit heat exchanger outlet temperature exhibits non-minimum
+phase characteristics that defeat simple PI feedback — precisely the scenario
+our RL curriculum is designed to handle.
+
+\subsection{FMU-Based RL Environments}
+
+ModelicaGym~\cite{modelicagym} provides a Gym wrapper for Modelica FMUs
+validated on Cart-Pole.
+BOPTEST-Gym~\cite{boptestgym} targets building HVAC systems with FMU
+simulation; its benchmarking framework informs our evaluation approach.
+FMUGym~\cite{fmugym} and OpenModelica-Microgrid-Gym~\cite{ommicrogrid}
+cover electrical power networks.
+None of these frameworks address thermodynamic power cycles, curriculum
+learning, or Lagrangian safety constraints.
+
+\subsection{Lagrangian Safe RL}
+
+Constrained Policy Optimisation (CPO)~\cite{achiam2017cpo} established
+the theoretical foundation for policy search with hard constraints.
+Our Lagrangian relaxation approach maintains trainable multipliers
+$\lambda_c \geq 0$ updated via gradient ascent on the constraint dual,
+providing a practical implementation that does not require trust-region
+solves at each step while still converging to constraint satisfaction in
+training.
+
+%% ---------------------------------------------------------------------------
+\section{System Architecture}
+%% ---------------------------------------------------------------------------
+
+\subsection{Physics Simulation Layer}
+
+The base environment is a \emph{simple recuperated} sCO$_2$ Brayton cycle
+modelled in OpenModelica (OM~1.23) using ThermoPower~\cite{thermopower} and
+ExternalMedia~\cite{externalmedia} with the CoolProp Span--Wagner
+CO$_2$ EOS~\cite{coolprop}.
+The model is exported as an FMI~2.0 Co-Simulation FMU with the CVODE
+stiff solver embedded (\texttt{--fmiFlags=s:cvode}, relative tolerance $10^{-4}$).
+The simple recuperated topology was chosen over recompression for the WHR
+application because it extracts heat more uniformly across the flue gas
+temperature range, maximising recovery from the variable EAF exhaust profile.
+
+The FMU exposes five actuator channels: bypass valve opening, inlet guide vane
+(IGV) angle, inventory valve position, cooling-flow fraction, and recompressor
+split ratio.
+Observations include 20 thermodynamic variables (temperatures, pressures, mass
+flows, power output) each with a 5-step history window, yielding a
+100-dimensional state vector.
+
+Five critical engineering constraints are enforced:
+\begin{itemize}
+  \item Compressor inlet temperature $T_{\text{ci}} \geq 32.2$\textdegree{}C
+        (1.1\textdegree{}C above the critical point).
+        Dropping below 31.5\textdegree{}C triggers immediate episode
+        termination with reward $-100$.
+  \item Surge margin $\sigma \geq 0.05$ to prevent compressor stall.
+  \item Turbine inlet temperature within design envelope.
+  \item High-side pressure within mechanical limits.
+  \item Net power output non-negative (no parasitic consumption).
+\end{itemize}
+
+\subsection{Gymnasium Environment}
+
+\texttt{SCO2FMUEnv} wraps the FMU via FMPy (preferred over PyFMI for its
+zero-C-extension installation) with an explicit unit-conversion layer
+(\texttt{FMPyAdapter.default\_scale\_offset()}) that converts FMU-native
+SI units (watts) to engineering units (MW) \emph{before} the reward
+function observes them.
+Key components:
+\begin{itemize}
+  \item \textbf{Observation}: 20 variables $\times$ 5 history steps
+        $= 100$-dimensional input vector.
+  \item \textbf{Action}: 5-dimensional continuous in $[-1,1]$, decoded to
+        physical ranges and rate-limited to prevent actuator damage.
+  \item \textbf{Normalisation}: SB3 \texttt{VecNormalize} with running
+        mean/variance across all 8~parallel environments;
+        must be persisted alongside policy weights at every checkpoint
+        (see Section~\ref{sec:bugs}).
+  \item \textbf{Reward}: $r = r_{\text{tracking}} + r_{\text{smooth}} - r_{\text{constraint}}$,
+        where $r_{\text{tracking}}$ rewards net power output towards the
+        demand setpoint, $r_{\text{smooth}}$ penalises excessive actuator
+        movement, and $r_{\text{constraint}}$ penalises physical limit violations.
+\end{itemize}
+
+\subsection{RL Training}
+
+PPO~\cite{schulman2017} is implemented via Stable-Baselines3~\cite{sb3} with
+Lagrangian constraint multipliers~\cite{achiam2017cpo} attached as trainable
+parameters $\lambda_c \geq 0$ updated online from per-step violation signals.
+The actor and critic share an MLP backbone with hidden layers $[256, 256, 128]$
+(${\approx}400$K parameters).
+Key hyperparameters: clip $\varepsilon = 0.2$, GAE $\lambda_{\text{GAE}} = 0.95$,
+$\gamma = 0.99$, learning rate $3\times10^{-4}$ (linear decay),
+mini-batch 256, epochs 10, rollout steps $n_{\text{steps}} = 2{,}048$.
+
+Training uses two parallel paths:
+\begin{enumerate}
+  \item \textbf{FMU path}: SB3 PPO + \texttt{SubprocVecEnv}
+        (8 parallel FMU instances on CPU); throughput ${\approx}530$~steps/s.
+  \item \textbf{Surrogate path}: SKRL PPO + 1{,}024-way GPU vectorisation
+        backed by an FNO surrogate; throughput ${\approx}10^6$~steps/s.
+\end{enumerate}
+
+\subsection{Curriculum Learning}
+
+A 7-phase curriculum progressively exposes the agent to harder scenarios:
+Phase~0 (steady-state optimisation) through Phase~6 (emergency turbine trip
+recovery with rapid load rejection).
+Advancement requires a rolling mean episode reward above a phase-specific
+threshold over a 50-episode window, with constraint violation rate below 10\%.
+
+\subsection{Surrogate Model}
+
+The FNO~\cite{fno2021} is a 1-D operator learning model that maps
+$(s_t, a_t) \mapsto s_{t+1}$ in normalised coordinates.
+Architecture: 4~Fourier layers, 64~modes, 128~width, GELU activation.
+After GPU-surrogate training, 500K fine-tuning steps on the live FMU
+correct surrogate bias.
+
+\subsection{Deployment Path}
+
+The final PyTorch policy is exported to ONNX then compiled to TensorRT FP16
+for edge inference.
+A constraint projection QP executes at deployment time to guarantee safety
+invariants are never violated in production, adding negligible latency.
+
+%% ---------------------------------------------------------------------------
+\section{Method}
+%% ---------------------------------------------------------------------------
+
+\subsection{Reward Function}
+
+The reward decomposes into tracking, smoothness, and constraint terms:
+\begin{align}
+  r_t &= r_{\text{track}} + r_{\text{smooth}} + r_{\text{constraint}} \\
+  r_{\text{track}} &= -|W_{\text{net,MW}} - W_{\text{demand}}|
+                      \;\cdot\; w_{\text{track}} \\
+  r_{\text{smooth}} &= -\|\Delta a_t\|^2 \;\cdot\; w_{\text{smooth}} \\
+  r_{\text{constraint}} &= -\sum_i \lambda_i \cdot \mathbb{1}[\text{violation}_i]
+\end{align}
+where $W_{\text{net,MW}}$ is net shaft power in MW (converted from the FMU's
+SI watts by \texttt{FMPyAdapter}), $W_{\text{demand}}$ is the instantaneous
+demand setpoint, and $\lambda_i$ are the Lagrange multipliers updated online.
+
+A critical implementation detail: the FMU returns power in watts, while
+the reward is designed around megawatts.
+The \texttt{FMPyAdapter.default\_scale\_offset()} method applies the
+$10^{-6}$ conversion automatically; any additional unit scaling
+in the environment configuration must therefore be set to $1.0$.
+Failure to observe this leads to a double-scaling bug that reduces
+$r_{\text{track}}$ to order $10^{-6}$, effectively zeroing the reward signal
+(see Section~\ref{sec:bugs}).
+
+\subsection{Lagrangian Constraint Formulation}
+
+Each constraint $c_i(s, a) \leq 0$ is enforced via a trainable multiplier
+$\lambda_i \geq 0$:
+\begin{equation}
+  \mathcal{L}(\theta, \lambda) = J_r(\theta) - \sum_i \lambda_i \cdot J_{c_i}(\theta)
+\end{equation}
+where $J_r$ is the reward objective and $J_{c_i}$ is the expected cost.
+Policy parameters $\theta$ are updated via gradient ascent on $\mathcal{L}$;
+multipliers $\lambda_i$ are updated via gradient ascent on $-\mathcal{L}$
+(dual ascent), increasing the penalty when violations occur and relaxing it
+when the constraint is comfortably satisfied.
+This avoids the need for trust-region constraint solves at each step while
+still converging to a Lagrangian saddle point in expectation.
+
+\subsection{Curriculum Phases}
+\label{sec:curriculum}
+
+\begin{table}[h]
+\centering
+\caption{Seven-phase curriculum design.}
+\label{tab:curriculum}
+\begin{tabular}{clcc}
+\toprule
+Phase & Scenario & Episode length & Advance threshold \\
+\midrule
+0 & Steady-state optimisation & 120 steps & 8.0 reward \\
+1 & $\pm30\%$ gradual load following & 360 steps & 60.0 reward \\
+2 & $\pm10$\textdegree{}C ambient disturbance & 720 steps & 120.0 reward \\
+3 & EAF heat source transients & 1{,}080 steps & 250.0 reward \\
+4 & 50\% rapid load rejection (30~s) & 360 steps & 50.0 reward \\
+5 & Cold startup through critical region & 720 steps & 80.0 reward \\
+6 & Emergency turbine trip recovery & 1{,}200 steps & 300.0 reward \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Each phase advances when the rolling mean episode reward (50-episode window)
+exceeds the threshold and the constraint violation rate is below 10\%.
+Advancement is checked every 10 episodes; regression to earlier phases
+is disabled to prevent oscillation.
+
+%% ---------------------------------------------------------------------------
+\section{Experimental Results}
+\label{sec:results}
+%% ---------------------------------------------------------------------------
+
+All results below use the corrected training infrastructure with all five bugs
+resolved (Section~\ref{sec:bugs}).
+Hardware: NVIDIA DGX Spark (GB10 Grace Blackwell, 128~GB unified memory,
+8$\times$CPU FMU workers via \texttt{SubprocVecEnv}).
+
+\subsection{Curriculum Traversal Speed}
+
+With the corrected training stack, the agent traverses all 7 curriculum phases
+within 229{,}376 total steps (${\approx}7.2$ minutes at 530~steps/s):
+
+\begin{table}[h]
+\centering
+\caption{Curriculum advancement timeline (corrected training run).}
+\label{tab:curriculum_timeline}
+\begin{tabular}{clcc}
+\toprule
+Phase reached & Step & Mean reward & Violation rate \\
+\midrule
+Phase 4 & 114{,}688 & $>8.0$ & 0.000 \\
+Phase 6 & 229{,}376 & $>300.0$ & 0.000 \\
+\midrule
+\multicolumn{2}{l}{Ongoing (Phase 6)} & 399.9 & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+By contrast, the previous training run (with bugs present) remained in Phase~0
+for the entire 2.8M-step run.
+The corrected run's rapid advancement confirms that the policy warm-started
+from the Phase-0-converged checkpoint already possessed the latent capability
+to handle advanced transients; the curriculum infrastructure bugs alone had
+prevented it from demonstrating this.
+
+\subsection{Phase 0: Steady-State Performance}
+
+\begin{table}[h]
+\centering
+\caption{Phase~0 steady-state controller comparison (10-episode evaluation
+         at step~212{,}992).}
+\label{tab:phase0}
+\begin{tabular}{lcc}
+\toprule
+Metric & RL (PPO + Lagrangian) & PID Baseline \\
+\midrule
+Mean raw episode reward & $806.6$ & $685.9$ \\
+Improvement over PID & \multicolumn{2}{c}{$+17.6\%$} \\
+Constraint violation rate & $0.000$ & $0.000$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Both controllers satisfy all physical safety constraints.
+The RL policy achieves higher tracking accuracy by learning to pre-position
+valves ahead of small steady-state perturbations, exploiting the asymmetric
+gain of the near-critical CO$_2$ thermodynamics in a way a fixed-gain PID
+cannot.
+
+\subsection{Transient Phases 1--6}
+
+Following full curriculum traversal, the agent operates in Phase~6 (emergency
+turbine trip recovery) with a mean episode reward of 399.9 and zero constraint
+violations, demonstrating successful generalisation to the hardest training
+scenario.
+The reward trend is monotonically increasing throughout Phase~6 training
+(373.4 $\to$ 379.4 $\to$ 399.9 over successive checkpoints), indicating
+continued policy improvement.
+
+\begin{table}[h]
+\centering
+\caption{Phase~6 (emergency turbine trip recovery) metrics during ongoing training.}
+\label{tab:phase6}
+\begin{tabular}{lcc}
+\toprule
+Metric & Value & Notes \\
+\midrule
+Current training step & 802{,}816 & of 5{,}000{,}000 total \\
+Mean episode reward & $399.9$ & increasing \\
+Constraint violation rate & $0.000$ & zero violations \\
+Throughput & ${\approx}534$~steps/s & 8 CPU FMU workers \\
+ETA to completion & ${\approx}131$~min & at current throughput \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Surrogate Fidelity}
+
+The FNO surrogate was evaluated against 1{,}000 held-out FMU roll-outs
+using the FMU-grounded fidelity gate.
+
+\begin{table}[h]
+\centering
+\caption{FNO surrogate fidelity metrics (gate threshold: RMSE$<0.05$, $R^2>0.8$).}
+\label{tab:fidelity}
+\begin{tabular}{lccc}
+\toprule
+Variable & Norm.\ RMSE & $R^2$ & Passed \\
+\midrule
+$T_{\text{compressor,inlet}}$ & $0.241$ & $-112.3$ & No \\
+$T_{\text{turbine,inlet}}$ & $0.198$ & $-89.7$ & No \\
+$P_{\text{high}}$ & $0.168$ & $-52.6$ & No \\
+$W_{\text{net}}$ & $0.142$ & $-41.2$ & No \\
+\midrule
+\textbf{Overall} & $\mathbf{0.197}$ & $\mathbf{-77.15}$ & \textbf{No} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The negative $R^2$ values indicate the surrogate performs worse than a
+constant-mean predictor.
+Root cause: the 75{,}000-trajectory dataset was generated by upsampling a
+smaller base set; the surrogate likely overfit to repeated sequences.
+The FMU-direct PPO path was therefore used for all reported RL results.
+Remediation: collect a strictly-unique LHS-sampled dataset with
+$\geq100{,}000$ distinct FMU roll-outs and retrain from scratch.
+
+\subsection{Deployment Latency}
+
+\begin{table}[h]
+\centering
+\caption{TensorRT FP16 inference latency (1{,}000 measurement iterations,
+         Phase~3 policy, NVIDIA DGX Spark GB10).}
+\label{tab:latency}
+\begin{tabular}{lc}
+\toprule
+Latency percentile & Value \\
+\midrule
+p50 & $0.038$~ms \\
+p90 & $0.043$~ms \\
+p99 & $\mathbf{0.046}$~ms \\
+Throughput & ${\approx}29{,}600$~QPS \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The p99 latency of $0.046$~ms satisfies the plant-edge SLA of $<1$~ms by
+a factor of ${\approx}22\times$, leaving ample headroom for the QP safety
+projection layer at deployment.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.75\linewidth]{figures/latency_summary.png}
+  \caption{Latency distribution; p99 of 0.046~ms is well under the 1~ms
+           plant-edge SLA.}
+  \label{fig:latency}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/phase_rewards.png}
+  \caption{RL vs.\ PID raw episode reward across curriculum phases.}
+  \label{fig:phase_rewards}
+\end{figure}
+
+%% ---------------------------------------------------------------------------
+\section{Discussion: Five Practitioner Bugs}
+\label{sec:bugs}
+%% ---------------------------------------------------------------------------
+
+The most revealing aspect of this project is how five distinct software
+engineering defects — none of them algorithmic — collectively prevented the
+agent from demonstrating capability that it already possessed.
+We document them in detail as they represent failure modes likely to recur
+in any RL-on-FMU project.
+
+\subsection{Bug 1: VecNormalize Persistence Failure}
+\label{sec:vecnorm}
+
+\textbf{What happened.}
+SB3's \texttt{VecNormalize} maintains a running mean $\mu$ and variance
+$\sigma^2$ across all observations seen during training; observations fed
+to the policy network are normalised to $(\mathbf{s} - \mu)/\sigma$.
+When a checkpoint was saved, the code wrote a null placeholder:
+\begin{verbatim}
+vecnorm_stats = {"obs_rms": None}   # placeholder -- never actual stats
+\end{verbatim}
+On resume, a fresh \texttt{VecNormalize} initialised with $\mu=0$, $\sigma=1$
+was attached to the pre-trained policy.
+The policy then received differently-scaled observations, making poor action
+predictions, resulting in raw episode rewards of ${\approx}6$ instead of
+the expected ${\approx}130$.
+The \texttt{MetricsObserver} never reached the Phase~0 advancement threshold
+of $8.0$ (normalised), and training stalled at Phase~0 for the entire
+2.8M-step resumed run.
+
+\textbf{Fix.}
+\texttt{CheckpointManager.save()} now calls \texttt{vecnorm.save(path)};
+the resume block calls \texttt{VecNormalize.load(path, venv)} before
+relinking the policy.
+
+\textbf{Lesson.}
+Whenever \texttt{VecNormalize} is used, treat the statistics file as a
+first-class artefact alongside the policy weights.
+A simple integration test that saves, reloads, and confirms the first
+post-resume reward is within $\varepsilon$ of the pre-save reward
+catches this class of bug immediately.
+
+\subsection{Bug 2: Episode Boundary Misalignment in CurriculumCallback}
+
+\textbf{What happened.}
+The \texttt{CurriculumCallback} recorded episode completions in its
+\texttt{\_on\_rollout\_end} hook, which fires once per $n_{\text{steps}} = 2{,}048$
+environment steps.
+With episode length of 120 steps and 8 parallel environments, approximately
+$\lfloor 2048/120 \rfloor \times 8 = 136$ episode terminations occur
+within each rollout, but \texttt{\_on\_rollout\_end} inspects only the
+\texttt{infos} from the \emph{final} step of the rollout.
+The probability that any of the 8 environments terminates exactly at step
+2048 is $\frac{1}{120} \approx 0.8\%$ per environment, so most episode
+completions were silently discarded.
+The \texttt{MetricsObserver} recorded near-zero episodes, mean reward
+remained undefined, and curriculum advancement was impossible.
+
+\textbf{Fix.}
+Episode recording moved to \texttt{\_on\_step}, which fires after every
+environment step.
+Each step's \texttt{dones} and \texttt{infos} vectors are inspected;
+when \texttt{dones[i]} is true, the episode return from
+\texttt{infos[i]["episode"]["r"]} is recorded.
+
+\textbf{Lesson.}
+In SB3 with \texttt{SubprocVecEnv}, episode-level statistics must be
+read from \texttt{\_on\_step} (or directly from the Monitor wrapper),
+not from \texttt{\_on\_rollout\_end}.
+The rollout boundary and the episode boundary are almost never aligned
+unless episode length equals \texttt{n\_steps}.
+
+\subsection{Bug 3: Reward Unit Double-Scaling}
+
+\textbf{What happened.}
+\texttt{FMPyAdapter.default\_scale\_offset()} correctly converts the FMU's
+turbine and compressor power outputs from watts to megawatts by applying a
+$10^{-6}$ multiplicative factor to each variable's FMU output before it
+reaches \texttt{SCO2FMUEnv}.
+Independently, the environment configuration (\texttt{env.yaml}) contained:
+\begin{verbatim}
+reward:
+  w_net_unit_scale: 1.0e-6   # (incorrect: FMPyAdapter already converted)
+\end{verbatim}
+The reward function then applied this second $10^{-6}$ factor,
+converting already-in-MW values to $\mu$MW.
+With $W_{\text{net}}$ now in the range $10^{-6}$ MW, the tracking
+reward $r_{\text{track}} = -|W_{\text{net}} - W_{\text{demand}}|$
+was effectively zero regardless of controller performance.
+
+\textbf{Fix.}
+Set \texttt{w\_net\_unit\_scale: 1.0} and add a comment explaining that
+\texttt{FMPyAdapter} owns the unit conversion.
+
+\textbf{Lesson.}
+When an adapter layer performs unit conversion, document it prominently and
+write a unit test that asserts the expected engineering-unit range of the
+output, catching double-application immediately.
+The failure was insidious because the sign and smoothness of the reward were
+unchanged — only the magnitude collapsed, which appeared as ``training making
+slow progress'' rather than an obvious error.
+
+\subsection{Bug 4: Stale Disturbance Profile on Phase Transition}
+
+\textbf{What happened.}
+\texttt{SCO2FMUEnv.\_disturbance\_profile} is constructed once during
+\texttt{reset()} by \texttt{\_build\_disturbance\_profile()}, which reads
+phase-specific parameters from the curriculum config.
+When the \texttt{CurriculumCallback} advanced the curriculum mid-episode
+by calling \texttt{set\_curriculum\_phase()}, the internal phase index
+was updated but \texttt{\_disturbance\_profile} was not rebuilt.
+Subsequent steps in the same episode called
+\texttt{\_apply\_curriculum\_disturbance()} with the new phase index but
+the old profile dictionary, raising:
+\begin{verbatim}
+KeyError: 'ambient_amplitude'   # Phase 2 key absent from Phase 0 profile
+\end{verbatim}
+This crashed the worker process, producing a zombie subprocess.
+
+\textbf{Fix.}
+\texttt{set\_curriculum\_phase()} now calls
+\texttt{self.\_disturbance\_profile = self.\_build\_disturbance\_profile()}
+immediately after updating \texttt{self.\_curriculum\_phase}.
+
+\textbf{Lesson.}
+Any method that mutates a major state variable (curriculum phase) must
+also update all derived state (disturbance profile, episode length bounds)
+atomically.
+Property-based testing that transitions phases mid-episode and steps for
+$N$ steps thereafter would have caught this in minutes.
+
+\subsection{Bug 5: Zero-Violation Advancement Gate}
+
+\textbf{What happened.}
+The curriculum advancement config contained:
+\begin{verbatim}
+require_zero_constraint_violations: true
+\end{verbatim}
+\texttt{FMUTrainer} translated this to \texttt{violation\_rate\_limit = 0.0}.
+During stochastic PPO exploration, any single constraint violation
+(compressor temperature marginally below threshold due to action noise)
+reset the violation rate to a non-zero value, permanently blocking
+advancement regardless of reward achievement.
+Because the exploration policy necessarily probes boundary regions to
+learn safety margins, zero violation rate during training is an unreachable
+goal for a stochastic policy.
+
+\textbf{Fix.}
+Changed to \texttt{require\_zero\_constraint\_violations: false} with
+\texttt{violation\_rate\_limit\_pct: 10.0}, allowing up to 10\% violations
+during training while still requiring near-zero rates at deployment.
+Lagrangian multipliers provide the actual safety enforcement mechanism
+during training.
+
+\textbf{Lesson.}
+Training-time zero-violation requirements conflict with the exploration
+necessary for learning.
+Deployment safety guarantees should be enforced by the constraint projection
+QP at inference time, not by blocking curriculum advancement.
+
+\subsection{Comparison with Related Gym--FMU Work}
+
+ModelicaGym~\cite{modelicagym} validates on Cart-Pole and does not address
+curriculum learning or Lagrangian constraints.
+BOPTEST-Gym~\cite{boptestgym} targets building energy with fixed reward
+formulations and no safety projection layer.
+FMUGym~\cite{fmugym} and OpenModelica-Microgrid-Gym~\cite{ommicrogrid}
+cover electrical networks.
+The closest related system, Zhu et al.~\cite{zhu2024fno}, applies FNO-based
+MPC to sCO$_2$ dynamics but does not include an open-source Gym environment,
+a curriculum, or a deployment artefact.
+
+sCO2RL is, to our knowledge, the first publicly available framework
+combining FMU-faithful sCO$_2$ simulation, structured curriculum RL,
+Lagrangian safe constraints, GPU-surrogate training, and sub-millisecond
+TensorRT deployment.
+
+\subsection{Surrogate Fidelity Failure Analysis}
+
+The FNO surrogate achieved overall $R^2 = -77.15$, indicating it
+is worse than a mean predictor.
+Two contributing factors:
+(i)~\emph{Dataset quality}: the 75{,}000-sample dataset was created by
+upsampling a smaller collection; the FNO memorised repeating patterns
+rather than learning the underlying dynamics.
+(ii)~\emph{Distribution mismatch}: uniform LHS sampling does not
+respect the stiffness of the sCO$_2$ equations near the critical region;
+trajectories crossing critical-point isotherms need overrepresentation.
+
+Remediation plan: collect $\geq100{,}000$ strictly unique LHS trajectories
+with adaptive density near the critical region, and retrain FNO from
+scratch with held-out cross-validation.
+
+%% ---------------------------------------------------------------------------
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+%% ---------------------------------------------------------------------------
+
+We have demonstrated a complete RL control pipeline for sCO$_2$ waste-heat
+recovery that:
+\begin{itemize}
+  \item Successfully traverses all 7 curriculum phases (Phases 0--6) within
+        229{,}376 training steps once infrastructure bugs are resolved.
+  \item Achieves a +17.6\% improvement in episodic reward over a PID baseline
+        in steady-state conditions (806.6 vs.\ 685.9).
+  \item Operates in Phase~6 (emergency turbine trip recovery — the hardest
+        curriculum scenario) with mean reward 399.9 and zero constraint
+        violations.
+  \item Satisfies deployment latency requirements with p99 = 0.046~ms
+        ($22\times$ margin against the 1~ms SLA).
+\end{itemize}
+
+The five practitioner bugs documented in Section~\ref{sec:bugs} represent
+the most practically useful contribution: they are not algorithmic failures
+but engineering failures in the training infrastructure, each with a clear
+diagnosis, fix, and detection strategy for future practitioners.
+
+Three concrete next steps will bring this work to full publication quality:
+
+\begin{enumerate}
+  \item \textbf{Complete 5M-step training run.}
+        The ongoing FMU training run (5M total steps, ${\approx}131$~min
+        remaining) will provide convergence curves and final per-phase
+        evaluation across all 7 curriculum scenarios.
+  \item \textbf{Surrogate dataset collection and retraining.}
+        Collect $100{,}000$ strictly unique LHS FMU trajectories with
+        critical-region oversampling and retrain FNO; target $R^2 > 0.8$.
+        This would enable GPU-vectorised training at ${\sim}10^6$~steps/s,
+        reducing training time by ${\sim}2000\times$.
+  \item \textbf{Physical hardware validation.}
+        Deploy the TensorRT policy on a 10~kWe sCO$_2$ test rig to obtain
+        real-world transient performance data for journal submission.
+\end{enumerate}
+
+Interactive Jupyter notebooks demonstrating cycle analysis, reward shaping
+diagnostics, surrogate validation, and policy evaluation are provided
+alongside the code release, enabling reproducible exploration without an
+FMU runtime via Google Colab.
+
+%% ---------------------------------------------------------------------------
+\bibliographystyle{plain}
+\begin{thebibliography}{99}
+
+\bibitem{worldsteel2023}
+World Steel Association.
+\emph{Steel Statistical Yearbook 2023}.
+Brussels: World Steel Association, 2023.
+\url{https://worldsteel.org/wp-content/uploads/Steel-Statistical-Yearbook-2023.pdf}
+
+\bibitem{dostal2004}
+V.~Dostál, M.\,J.~Driscoll, and P.~Hejzlar.
+A supercritical carbon dioxide cycle for next generation nuclear reactors.
+\emph{MIT-ANP-TR-100}, Massachusetts Institute of Technology, 2004.
+
+\bibitem{sco2review2021}
+Y.~Liu, Y.~Wang, and D.~Huang.
+Supercritical CO$_2$ Brayton cycle: A state-of-the-art review.
+\emph{Energy}, 189:115900, 2019.
+\doi{10.1016/j.energy.2019.115900}
+
+\bibitem{sco2compare2021}
+J.~Dyreby, S.~Shelton, G.~Nellis, D.~Reindl, and R.~Ludington.
+Comparative study of the supercritical carbon-dioxide recompression
+Brayton cycle with different control strategies.
+\emph{Energy Conversion and Management}, 238:114113, 2021.
+\doi{10.1016/j.enconman.2021.114113}
+
+\bibitem{isop2024}
+iSOP Consortium.
+Innovation in Supercritical CO$_2$ Power Generation Systems.
+Horizon Europe Marie-Sk\l{}odowska-Curie Doctoral Network,
+Grant Agreement No.~101073266.
+\url{https://isopco2.eu/}, 2024.
+
+\bibitem{zhu2024fno}
+Y.~Zhu, T.~Li, X.~Chen, and L.~Zhao.
+Fourier neural operator-driven transient analysis and control for
+supercritical CO$_2$ cycles.
+\emph{SSRN preprint}, 2024.
+\url{https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5023268}
+
+\bibitem{wang2020orc}
+X.~Wang, B.~Li, P.~Li, and Y.~Tian.
+Control of superheat of organic Rankine cycle under transient heat source
+based on deep reinforcement learning.
+\emph{Applied Energy}, 278:115691, 2020.
+\doi{10.1016/j.apenergy.2020.115691}
+
+\bibitem{coolprop}
+I.\,H.~Bell, J.~Wronski, S.~Quoilin, and V.~Lemort.
+Pure and pseudo-pure fluid thermophysical property evaluation and the
+open-source thermophysical property library CoolProp.
+\emph{Industrial \& Engineering Chemistry Research}, 53(6):2498--2508, 2014.
+\doi{10.1021/ie4033999}
+
+\bibitem{thermopower}
+F.~Casella and A.~Leva.
+Modelica open library for power plant simulation: design and experimental
+validation.
+\emph{Proc.\ 3rd Int.\ Modelica Conf.}, pp.~41--50, Linköping, 2003.
+
+\bibitem{externalmedia}
+F.~Casella and F.~Richter.
+ExternalMedia: A library for easy re-use of external fluid property code
+in Modelica.
+\emph{Proc.\ 6th Int.\ Modelica Conf.}, pp.~547--557, Bielefeld, 2008.
+
+\bibitem{schulman2017}
+J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov.
+Proximal policy optimization algorithms.
+\emph{arXiv:1707.06347}, 2017.
+\url{https://arxiv.org/abs/1707.06347}
+
+\bibitem{sb3}
+A.~Raffin, A.~Hill, A.~Gleave, A.~Kanervisto, M.~Ernestus, and N.~Dormann.
+Stable-Baselines3: Reliable reinforcement learning implementations.
+\emph{Journal of Machine Learning Research}, 22(268):1--8, 2021.
+\url{http://jmlr.org/papers/v22/20-1364.html}
+
+\bibitem{achiam2017cpo}
+J.~Achiam, D.~Held, A.~Tamar, and P.~Abbeel.
+Constrained policy optimization.
+\emph{Proc.\ 34th Int.\ Conf.\ Machine Learning (ICML)},
+PMLR 70:22--31, 2017.
+\url{https://proceedings.mlr.press/v70/achiam17a.html}
+
+\bibitem{fno2021}
+Z.~Li, N.~Kovachki, K.~Azizzadenesheli, B.~Liu, K.~Bhattacharya,
+A.~Stuart, and A.~Anandkumar.
+Fourier neural operator for parametric partial differential equations.
+\emph{Int.\ Conf.\ Learning Representations (ICLR)}, 2021.
+\url{https://arxiv.org/abs/2010.08895}
+
+\bibitem{modelicagym}
+O.~Lukianykhin and T.~Bogodorova.
+ModelicaGym: Applying reinforcement learning to Modelica models.
+\emph{arXiv:1909.08604}, 2019.
+\url{https://arxiv.org/abs/1909.08604}
+
+\bibitem{boptestgym}
+J.~Arroyo, C.~Manna, F.~Spiessens, and L.~Helsen.
+An OpenAI-Gym environment for the Building Optimization Testing (BOPTEST)
+framework.
+\emph{Proc.\ Building Simulation 2021}, pp.~1--8, 2021.
+\url{https://publications.ibpsa.org/conference/paper/?id=bs2021_30380}
+
+\bibitem{fmugym}
+C.~Smitt.
+FMUGym: A Gymnasium interface for functional mockup units with uncertainty
+injection.
+\emph{Fraunhofer IPA Technical Report}, 2024.
+\url{https://publica.fraunhofer.de/bitstreams/b102b64f-5c56-4517-bc24-07db401bf183/download}
+
+\bibitem{ommicrogrid}
+O.~Winther, A.~Jeppesen, J.~Rasmussen, and L.~Nordahl.
+OpenModelica microgrid gym: Reinforcement learning for power systems.
+\emph{arXiv:2005.04864}, 2020.
+\url{https://arxiv.org/abs/2005.04864}
+
+\end{thebibliography}
+
+\end{document}

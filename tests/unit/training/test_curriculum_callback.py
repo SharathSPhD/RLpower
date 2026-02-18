@@ -26,6 +26,7 @@ def _make_mock_scheduler(current_phase: int = 0, should_advance: bool = False):
     scheduler = MagicMock()
     scheduler.get_phase.return_value = current_phase
     scheduler.advance.return_value = should_advance
+    scheduler.get_phase_config.return_value = MagicMock(episode_length_steps=720)
     return scheduler
 
 
@@ -52,6 +53,7 @@ def _make_callback(
     checkpoint_mgr=None,
     checkpoint_freq: int = 10_000,
     vecnorm=None,
+    lagrangian_model=None,
     verbose: int = 0,
 ):
     from sco2rl.training.curriculum_callback import CurriculumCallback
@@ -69,6 +71,7 @@ def _make_callback(
         checkpoint_mgr=checkpoint_mgr,
         checkpoint_freq=checkpoint_freq,
         vecnorm=vecnorm,
+        lagrangian_model=lagrangian_model,
         verbose=verbose,
     )
 
@@ -122,8 +125,8 @@ class TestCurriculumCallbackImport:
 # ── Episode recording ──────────────────────────────────────────────────────────
 
 class TestEpisodeRecording:
-    def test_on_rollout_end_calls_record_episode_for_each_done(self):
-        """_on_rollout_end records one entry per done env."""
+    def test_on_step_calls_record_episode_for_each_done(self):
+        """_on_step records one entry per done env (episode counting moved from rollout_end)."""
         observer = _make_mock_observer()
         scheduler = _make_mock_scheduler()
         cb = _make_callback(observer=observer, scheduler=scheduler)
@@ -137,11 +140,11 @@ class TestEpisodeRecording:
             dones=[True, True],
         )
 
-        cb._on_rollout_end()
+        cb._on_step()
         assert observer.record_episode.call_count == 2
 
-    def test_on_rollout_end_skips_non_done_envs(self):
-        """_on_rollout_end skips infos for non-done envs."""
+    def test_on_step_skips_non_done_envs(self):
+        """_on_step skips infos for non-done envs."""
         observer = _make_mock_observer()
         scheduler = _make_mock_scheduler()
         cb = _make_callback(observer=observer, scheduler=scheduler)
@@ -155,7 +158,7 @@ class TestEpisodeRecording:
             dones=[True, False],
         )
 
-        cb._on_rollout_end()
+        cb._on_step()
         assert observer.record_episode.call_count == 1
 
     def test_record_episode_passes_reward_and_violation(self):
@@ -170,7 +173,7 @@ class TestEpisodeRecording:
             dones=[True],
         )
 
-        cb._on_rollout_end()
+        cb._on_step()
         observer.record_episode.assert_called_once_with(reward=7.5, violation_fraction=0.15)
 
 
@@ -222,7 +225,38 @@ class TestPhaseAdvancement:
         )
 
         cb._on_rollout_end()
-        vec_env.env_method.assert_called_once_with("set_curriculum_phase", 1)
+        vec_env.env_method.assert_called_once_with("set_curriculum_phase", 1, 720)
+
+    def test_updates_lagrange_multipliers_from_rollout_violations(self):
+        """Completed rollouts should trigger dual updates on the wrapper model."""
+        observer = _make_mock_observer(should_advance=False)
+        scheduler = _make_mock_scheduler(current_phase=0)
+        lagrangian_model = MagicMock()
+        cb = _make_callback(
+            observer=observer,
+            scheduler=scheduler,
+            lagrangian_model=lagrangian_model,
+        )
+        vec_env = _make_mock_vecenv(n_envs=1)
+        _wire_cb(cb, vec_env, num_timesteps=200)
+        cb.locals = _make_locals(
+            infos=[{
+                "episode": {"r": 8.0, "l": 15},
+                "constraint_violation": 0.1,
+                "constraint_violations": {
+                    "T_comp_min": 0.2,
+                    "surge_margin_main": 0.0,
+                },
+            }],
+            dones=[True],
+        )
+
+        # Violations accumulate in _on_step, then Lagrange update fires in _on_rollout_end
+        cb._on_step()
+        cb._on_rollout_end()
+        lagrangian_model.update_multipliers.assert_called_once_with(
+            {"T_comp_min": 0.2, "surge_margin_main": 0.0}
+        )
 
 
 # ── Checkpointing ──────────────────────────────────────────────────────────────

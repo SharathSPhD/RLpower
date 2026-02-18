@@ -23,6 +23,15 @@ topology:
   #   Heat Source → Turbine → RecHT → split → RecLT + Recompressor → RecHT → Heat Source
   #   Actions: bypass_valve, igv, inventory_valve, cooling_flow, split_ratio
 
+# ─── Controller Interface ─────────────────────────────────────────────────────
+# mode: none         -> current parameter-driven control (legacy)
+# mode: rl_external  -> expose command ports for external RL agent
+# mode: pid_baseline -> expose command ports for model-level PID baseline wiring
+controller:
+  mode: none
+  n_commands: 4
+  n_measurements: 14
+
 # ─── Design Point Parameters ─────────────────────────────────────────────────
 parameters:
   net_power_mwe: 10.0

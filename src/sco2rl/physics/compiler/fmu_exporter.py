@@ -74,8 +74,9 @@ class FMUExporter:
         self._omc.load_file(mo_path)
 
         # ── Step 4: Translate to FMU ─────────────────────────────────────────
+        class_name = self._qualified_class_name(mo_content, cycle_model.package)
         expr = (
-            f'translateModelFMU({cycle_model.name}, '
+            f'translateModelFMU({class_name}, '
             f'version="{self._FMI_VERSION}", '
             f'fmuType="{self._FMU_TYPE}")'
         )
@@ -100,3 +101,13 @@ class FMUExporter:
             cwd_fmu.rename(fmu_path)
 
         return fmu_path
+
+    @staticmethod
+    def _qualified_class_name(mo_content: str, package_name: str) -> str:
+        """Build a fully-qualified Modelica class path from 'within' header."""
+        first_line = mo_content.splitlines()[0].strip() if mo_content.splitlines() else ""
+        if first_line.startswith("within ") and first_line.endswith(";"):
+            namespace = first_line[len("within ") : -1].strip()
+            if namespace:
+                return f"{namespace}.{package_name}"
+        return package_name

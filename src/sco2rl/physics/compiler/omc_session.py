@@ -46,11 +46,17 @@ class OMCSessionWrapper:
         omc_path: str | None = None,
         max_retries: int = 3,
         retry_delay_s: float = 1.0,
+        load_thermopower: bool = True,
+        load_scope: bool = True,
+        load_externalmedia: bool = True,
     ) -> None:
         self._omc_path = omc_path
         self._session: Any = None
         self._max_retries = max_retries
         self._retry_delay_s = retry_delay_s
+        self._load_thermopower = load_thermopower
+        self._load_scope = load_scope
+        self._load_externalmedia = load_externalmedia
         self._connect()
 
     # ── Private ──────────────────────────────────────────────────────────────
@@ -83,14 +89,41 @@ class OMCSessionWrapper:
         )
         # Load Modelica standard library (always available in OMC)
         self._session.sendExpression("loadModel(Modelica)")
-        # Optional libraries — silently skip if not installed in this container
-        for lib_path in [
-            "/opt/libs/ThermoPower/package.mo",
-            "/opt/libs/SCOPE/package.mo",
-            "/opt/libs/ExternalMedia/package.mo",
-        ]:
-            if Path(lib_path).exists():
-                self._session.sendExpression(f'loadFile("{lib_path}")')
+        # Optional libraries — silently skip if not installed in this container.
+        # Some images clone repos with nested package roots (e.g. SCOPE/src/Steps).
+        optional_library_paths: list[tuple[str, list[str]]] = []
+        if self._load_thermopower:
+            optional_library_paths.append(
+                (
+                    "ThermoPower",
+                    ["/opt/libs/ThermoPower/package.mo", "/opt/libs/ThermoPower/ThermoPower/package.mo"],
+                )
+            )
+        if self._load_scope:
+            optional_library_paths.append(
+                (
+                    "Steps",
+                    [
+                        "/opt/libs/SCOPE/package.mo",
+                        "/opt/libs/SCOPE/src/Steps/package.mo",
+                        "/opt/libs/SCOPE/src/Modelica/Steps/package.mo",
+                    ],
+                )
+            )
+        if self._load_externalmedia:
+            optional_library_paths.append(("ExternalMedia", ["/opt/libs/ExternalMedia/package.mo"]))
+        for package_name, candidates in optional_library_paths:
+            loaded = False
+            for lib_path in candidates:
+                if Path(lib_path).exists():
+                    self._session.sendExpression(f'loadFile("{lib_path}")')
+                    loaded = True
+                    break
+            if loaded and package_name in {"ThermoPower", "Steps"}:
+                # Old SCOPE/ThermoPower branches target Modelica 3.x; convert in-session.
+                self._session.sendExpression(
+                    f'convertPackageToLibrary({package_name}, Modelica, "4.1.0")'
+                )
 
     # ── Public API ────────────────────────────────────────────────────────────
 

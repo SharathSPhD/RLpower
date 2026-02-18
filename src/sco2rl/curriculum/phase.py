@@ -28,3 +28,4 @@ class PhaseConfig:
     window_size: int            # Rolling window size for mean reward
     violation_rate_limit: float # Max fraction of episodes with constraint violations
     disturbance_amplitude: float  # Disturbance magnitude for this phase
+    episode_length_steps: int = 720  # Per-phase episode length (FMU control steps)

@@ -1,8 +1,8 @@
 """
-SurrogateTrainer: SKRL PPO agent training on GPU-vectorized SurrogateEnv (FNO-backed).
+SurrogateTrainer: SKRL PPO agent training on GPU-vectorized surrogate envs.
 
 This trainer:
-- Creates n_envs SurrogateEnv instances wrapped for SKRL
+- Creates n_envs surrogate environments wrapped for SKRL
 - Builds a SKRL PPO agent with separate policy and value networks
 - Saves/loads checkpoints in RULE-C4 format (5 required fields)
 - Logs to TensorBoard
@@ -93,7 +93,7 @@ class SurrogateTrainer:
         surrogate_model: any object with predict_next_state(state, action) -> next_state
         config: dict from skrl_ppo section of fno_surrogate.yaml
         env_class: gymnasium.Env subclass to instantiate for each parallel env.
-            Defaults to importing sco2rl.surrogate.environment.SurrogateEnv.
+            Defaults to importing sco2rl.surrogate.surrogate_env.SurrogateEnv.
         device: torch device string ("cpu" or "cuda"). Note: SKRL wrap_env may
             override this to the available accelerator; build_agent() will use
             the device that wrap_env actually selected.
@@ -109,7 +109,7 @@ class SurrogateTrainer:
         self._surrogate_model = surrogate_model
         self._config = config
         self._requested_device = device
-        self._env_class = env_class  # None => use real SurrogateEnv
+        self._env_class = env_class  # None => use TorchBatchedSurrogateEnv
         self._total_timesteps: int = 0
 
         # Resolved after build_envs() — may differ from _requested_device
@@ -139,40 +139,57 @@ class SurrogateTrainer:
     def _get_env_class(self) -> Type[gym.Env]:
         if self._env_class is not None:
             return self._env_class
-        from sco2rl.surrogate.environment import SurrogateEnv  # type: ignore
+        from sco2rl.surrogate.surrogate_env import SurrogateEnv
         return SurrogateEnv
 
     def build_envs(self) -> None:
-        """Create n_envs SurrogateEnv instances wrapped for SKRL.
+        """Create and wrap environment(s) for SKRL.
 
-        SKRL's wrap_env auto-selects the device (CUDA if available, else CPU).
-        After wrapping, self._device is updated to match the wrapper's device.
+        Default behavior (env_class=None): use TorchBatchedSurrogateEnv with one
+        batched forward pass per step for all environments.
+
+        Compatibility behavior (env_class provided): keep legacy SyncVectorEnv
+        path, used by unit tests that inject stub env classes.
         """
-        EnvClass = self._get_env_class()
         n_envs: int = self._config.get("n_envs", 2)
         env_config: dict = self._config.get("env_config", {})
         surrogate_model = self._surrogate_model
         requested_device = self._requested_device
 
-        def _make_env():
-            return EnvClass(
+        if self._env_class is None:
+            from sco2rl.surrogate.batched_env import TorchBatchedSurrogateEnv
+            raw_env = TorchBatchedSurrogateEnv(
                 model=surrogate_model,
                 config=env_config,
+                n_envs=n_envs,
                 device=requested_device,
             )
-
-        if n_envs == 1:
-            raw_env = _make_env()
+            env_type = "TorchBatchedSurrogateEnv"
         else:
-            raw_env = gym.vector.SyncVectorEnv([_make_env for _ in range(n_envs)])
+            EnvClass = self._get_env_class()
+
+            def _make_env():
+                return EnvClass(
+                    model=surrogate_model,
+                    config=env_config,
+                    device=requested_device,
+                )
+
+            if n_envs == 1:
+                raw_env = _make_env()
+            else:
+                raw_env = gym.vector.SyncVectorEnv([_make_env for _ in range(n_envs)])
+            env_type = getattr(EnvClass, "__name__", "custom_env")
 
         self._envs = wrap_env(raw_env, wrapper="gymnasium")
 
         # Resolve the actual device SKRL picked
         self._device = str(self._envs.device)
         logger.info(
-            "Built %d SurrogateEnv instances wrapped for SKRL (device=%s).",
-            n_envs, self._device
+            "Built %d %s environment(s) wrapped for SKRL (device=%s).",
+            n_envs,
+            env_type,
+            self._device,
         )
 
     def build_agent(self) -> None:
@@ -245,10 +262,23 @@ class SurrogateTrainer:
             raise RuntimeError("Call build_envs() and build_agent() before train().")
 
         if timesteps is None:
-            timesteps = self._config.get("total_timesteps", 5_000_000)
+            timesteps = int(self._config.get("total_timesteps", 5_000_000))
+
+        # By default, config total_timesteps is interpreted as desired transitions.
+        # For vectorized envs, SequentialTrainer timesteps counts env.step() calls.
+        treat_as_transitions = bool(self._config.get("timesteps_are_transitions", True))
+        trainer_timesteps = int(timesteps)
+        if treat_as_transitions and getattr(self._envs, "num_envs", 1) > 1:
+            trainer_timesteps = max(1, trainer_timesteps // int(self._envs.num_envs))
+            logger.info(
+                "Converting requested transitions=%d to trainer timesteps=%d (num_envs=%d).",
+                timesteps,
+                trainer_timesteps,
+                self._envs.num_envs,
+            )
 
         trainer_cfg = {
-            "timesteps": timesteps,
+            "timesteps": trainer_timesteps,
             "headless": True,
         }
         trainer = SequentialTrainer(
@@ -258,7 +288,10 @@ class SurrogateTrainer:
         )
         trainer.train()
 
-        self._total_timesteps += timesteps
+        if treat_as_transitions:
+            self._total_timesteps += trainer_timesteps * int(self._envs.num_envs)
+        else:
+            self._total_timesteps += trainer_timesteps
 
         # Collect mean reward from agent tracking data (may be NaN early on)
         mean_reward = float("nan")

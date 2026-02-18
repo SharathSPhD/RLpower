@@ -1,0 +1,89 @@
+{
+  "overall_rmse_normalized": 0.19725745653488658,
+  "overall_r2": -77.15335956641606,
+  "per_variable": {
+    "T_compressor_inlet": {
+      "rmse": 0.2761307954788208,
+      "r2": -0.5488579273223877
+    },
+    "T_compressor_outlet": {
+      "rmse": 0.256777044844954,
+      "r2": 0.08139652013778687
+    },
+    "T_turbine_inlet": {
+      "rmse": 0.35136735409720066,
+      "r2": -0.48681557178497314
+    },
+    "T_turbine_outlet": {
+      "rmse": 0.3849564102223211,
+      "r2": -0.1687561273574829
+    },
+    "T_recuperator_hot_in": {
+      "rmse": 0.3750235932101511,
+      "r2": -0.10922074317932129
+    },
+    "T_recuperator_cold_in": {
+      "rmse": 0.25105251678048746,
+      "r2": 0.121898353099823
+    },
+    "T_precooler_inlet": {
+      "rmse": 0.08752936813304134,
+      "r2": -0.2529740333557129
+    },
+    "T_precooler_outlet": {
+      "rmse": 0.2707131902376811,
+      "r2": -0.48867785930633545
+    },
+    "W_turbine": {
+      "rmse": 0.1617124557495117,
+      "r2": -0.44162118434906006
+    },
+    "W_main_compressor": {
+      "rmse": 0.13187476992607117,
+      "r2": -0.04747450351715088
+    },
+    "eta_compressor": {
+      "rmse": 2.5211069111140785e-06,
+      "r2": -85.58999633789062
+    },
+    "eta_recuperator": {
+      "rmse": 3.5600862702267473e-06,
+      "r2": -992.6585083007812
+    },
+    "Q_recuperator": {
+      "rmse": 0.21446081161499023,
+      "r2": -0.5574262142181396
+    },
+    "P_high": {
+      "rmse": 0.0,
+      "r2": 1.0
+    }
+  },
+  "critical_variables": {
+    "T_compressor_inlet": {
+      "rmse": 0.2761307954788208,
+      "r2": -0.5488579273223877,
+      "passed": false,
+      "threshold_rmse": 0.041666666666666664,
+      "threshold_r2": 0.98
+    },
+    "T_turbine_inlet": {
+      "rmse": 0.35136735409720066,
+      "r2": -0.48681557178497314,
+      "passed": false,
+      "threshold_rmse": 0.01240694789081886,
+      "threshold_r2": 0.97
+    }
+  },
+  "passed": false,
+  "timestamp": "2026-02-18T12:08:17.644727+00:00",
+  "metadata": {
+    "source": "real_fmu_rollout",
+    "requested_steps": 1000,
+    "collected_steps": 1000,
+    "fmu_path": "/workspace/artifacts/fmu_build/SCO2RecuperatedCycle.fmu",
+    "fno_weights_path": "/workspace/artifacts/surrogate/best_fno.pt",
+    "normalization_used": true,
+    "seed": 42
+  }
+}

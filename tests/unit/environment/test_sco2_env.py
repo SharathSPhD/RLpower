@@ -279,6 +279,17 @@ class TestStep:
         _, _, _, _, info = env.step(np.zeros(len(ACTION_VARS), dtype=np.float32))
         assert isinstance(info, dict)
 
+    def test_step_info_contains_reward_components(self):
+        env = _make_env()
+        env.reset()
+        _, _, _, _, info = env.step(np.zeros(len(ACTION_VARS), dtype=np.float32))
+        assert "reward_components" in info
+        components = info["reward_components"]
+        assert "r_tracking" in components
+        assert "r_efficiency" in components
+        assert "r_smoothness" in components
+        assert "reward_total" in components
+
     def test_step_increments_step_count(self):
         env = _make_env()
         env.reset()
@@ -522,3 +533,70 @@ class TestCurriculumPhase:
         assert "disturbance_applied" in info, (
             "Phase 3 step() must include 'disturbance_applied' key in info dict"
         )
+
+    def test_disturbance_profile_determinism(self):
+        """A seeded reset should rebuild the same disturbance profile."""
+        env = _make_env()
+        env.set_curriculum_phase(3)
+        env.reset(seed=123)
+        profile_a = dict(env._disturbance_profile)
+        env.reset(seed=123)
+        profile_b = dict(env._disturbance_profile)
+        assert profile_a == profile_b
+
+    def test_phase_1_load_follow_is_structured(self):
+        """Phase 1 should produce a smooth ramp profile, not per-step white noise."""
+        env = _make_env()
+        env.set_curriculum_phase(1)
+        env.reset(seed=7)
+        action = np.zeros(len(ACTION_VARS), dtype=np.float32)
+        setpoints: list[float] = []
+        for _ in range(20):
+            _, _, terminated, truncated, info = env.step(action)
+            setpoints.append(float(info["reward_components"]["w_net_setpoint"]))
+            if terminated or truncated:
+                break
+        assert len(setpoints) > 5
+        diffs = np.diff(np.asarray(setpoints, dtype=np.float64))
+        # Piecewise linear ramps should not flip derivative direction at every step.
+        derivative_sign = np.sign(diffs)
+        sign_changes = int(np.sum(derivative_sign[1:] * derivative_sign[:-1] < 0.0))
+        assert sign_changes <= 4
+        assert np.max(setpoints) > np.min(setpoints)
+
+    def test_phase_2_sinusoidal_disturbance_values(self):
+        """Phase 2 should emit bounded cooling-input overrides with temporal variation."""
+        env = _make_env(
+            safety={
+                "T_compressor_inlet_min": -999.0,
+                "surge_margin_min": -999.0,
+            }
+        )
+        env.set_curriculum_phase(2)
+        env.reset(seed=5)
+        action = np.full(len(ACTION_VARS), -1.0, dtype=np.float32)
+        values: list[float] = []
+        for _ in range(30):
+            _, _, terminated, truncated, info = env.step(action)
+            disturbance_inputs = info["disturbance_inputs"]
+            assert ACTION_VARS[3] in disturbance_inputs
+            values.append(float(disturbance_inputs[ACTION_VARS[3]]))
+            if terminated or truncated:
+                break
+        assert max(values) > min(values)
+        assert all(0.0 <= v <= 1.0 for v in values)
+
+    def test_phase_4_load_rejection_step_applied(self):
+        """Phase 4 should apply a downward setpoint step near the end of the episode."""
+        env = _make_env()
+        env.set_curriculum_phase(4)
+        env.reset(seed=42)
+        action = np.full(len(ACTION_VARS), -1.0, dtype=np.float32)
+        setpoints: list[float] = []
+        for _ in range(ENV_CONFIG["episode_max_steps"]):
+            _, _, terminated, truncated, info = env.step(action)
+            setpoints.append(float(info["reward_components"]["w_net_setpoint"]))
+            if terminated or truncated:
+                break
+        assert len(setpoints) >= 2
+        assert setpoints[-1] < setpoints[0] * 0.7

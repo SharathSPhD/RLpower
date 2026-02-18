@@ -1,11 +1,15 @@
 """CurriculumCallback — SB3 BaseCallback that wires curriculum into the training loop.
 
 Responsibilities:
-  1. On each rollout end: extract completed episode stats from infos and record
-     them in MetricsObserver.
-  2. After recording: ask MetricsObserver.should_advance(); if True, call
-     CurriculumScheduler.advance() and push the new phase to all VecEnv workers
-     via training_env.env_method("set_curriculum_phase", new_phase).
+  1. On each env step (_on_step): extract completed episode stats from infos and
+     record them in MetricsObserver.  Episode counting MUST happen in _on_step
+     (not _on_rollout_end) because episode boundaries rarely coincide with the
+     rollout boundary: with episode_max_steps=120 and n_steps=2048 per rollout,
+     2048 % 120 = 8, so the last step of a rollout is almost never an episode
+     terminal.  _on_rollout_end only sees infos/dones from the final step of the
+     rollout, missing all mid-rollout episode completions.
+  2. On rollout end (_on_rollout_end): update Lagrange multipliers, check phase
+     advancement, save checkpoints.
   3. Save a checkpoint (RULE-C4) every checkpoint_freq timesteps via
      CheckpointManager.save().
 
@@ -18,6 +22,7 @@ Design constraints:
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any
 
 import numpy as np
@@ -66,24 +71,27 @@ class CurriculumCallback(BaseCallback):
 
         # Track last checkpoint timestep to compute intervals
         self._last_checkpoint_at: int = 0
+        # Accumulate per-rollout violation stats for Lagrange multiplier update
+        self._rollout_violation_sums: dict[str, float] = defaultdict(float)
+        self._rollout_violation_count: int = 0
+        # Diagnostic counters
+        self._log_episode_interval: int = 100  # print observer stats every N episodes
+        self._last_logged_episodes: int = 0
 
     # -- BaseCallback interface -------------------------------------------------
 
     def _on_step(self) -> bool:
-        """Called after every env step; required by BaseCallback API."""
-        return True  # returning False would stop training
+        """Called after every env step.
 
-    def _on_rollout_end(self) -> None:
-        """Called after each rollout (n_steps * n_envs transitions collected).
-
-        Extract completed episodes → record in observer → maybe advance phase
-        → maybe save checkpoint.
+        Records completed episodes into MetricsObserver here (not in
+        _on_rollout_end) to avoid missing episodes whose boundaries do not
+        coincide with the rollout boundary.  Also accumulates per-step
+        constraint violations for the Lagrange multiplier update.
         """
         infos = self.locals.get("infos", [])
         dones = self.locals.get("dones", np.zeros(len(infos), dtype=bool))
 
-        # 1. Record each completed episode
-        for i, (info, done) in enumerate(zip(infos, dones)):
+        for info, done in zip(infos, dones):
             if not done:
                 continue
             ep_info = info.get("episode", {})
@@ -91,15 +99,73 @@ class CurriculumCallback(BaseCallback):
             violation = float(info.get("constraint_violation", 0.0))
             self.observer.record_episode(reward=reward, violation_fraction=violation)
 
+            # Accumulate per-episode constraint violations for Lagrange update
+            violations = info.get("constraint_violations", {})
+            if isinstance(violations, dict):
+                for key, value in violations.items():
+                    self._rollout_violation_sums[str(key)] += float(value)
+                self._rollout_violation_count += 1
+
+        # Periodic diagnostic logging every _log_episode_interval episodes
+        n_ep = self.observer.n_episodes
+        if n_ep > 0 and n_ep - self._last_logged_episodes >= self._log_episode_interval:
+            mean_r = self.observer.get_mean_reward()
+            viol_r = self.observer.get_violation_rate()
+            phase = self.scheduler.get_phase()
+            print(
+                f"[CurriculumCallback] step={self.num_timesteps} phase={phase} "
+                f"episodes={n_ep} mean_reward={mean_r:.2f} "
+                f"violation_rate={viol_r:.3f}",
+                flush=True,
+            )
+            self._last_logged_episodes = n_ep
+
+        return True  # returning False would stop training
+
+    def _on_rollout_end(self) -> None:
+        """Called after each rollout (n_steps * n_envs transitions collected).
+
+        Updates Lagrange multipliers from rollout-accumulated violations,
+        checks curriculum advancement, and saves checkpoints.
+        """
+        # Keep Lagrange multipliers synchronized with observed rollout violations.
+        if self._lagrangian_model is not None and self._rollout_violation_count > 0:
+            mean_violations = {
+                key: value / self._rollout_violation_count
+                for key, value in self._rollout_violation_sums.items()
+            }
+            self._lagrangian_model.update_multipliers(mean_violations)
+
+        # Reset rollout accumulators
+        self._rollout_violation_sums = defaultdict(float)
+        self._rollout_violation_count = 0
+
         # 2. Check if curriculum should advance
         current_phase = self.scheduler.get_phase()
+        mean_r = self.observer.get_mean_reward()
+        viol_r = self.observer.get_violation_rate()
+        if self.verbose >= 1:
+            print(
+                f"[CurriculumCallback] rollout_end step={self.num_timesteps} "
+                f"phase={current_phase} episodes={self.observer.n_episodes} "
+                f"mean_r={mean_r:.2f} viol_rate={viol_r:.3f}",
+                flush=True,
+            )
         if self.observer.should_advance(current_phase):
             advanced = self.scheduler.advance()
             if advanced:
                 new_phase = self.scheduler.get_phase()
-                self.model.get_env().env_method("set_curriculum_phase", new_phase)
-                if self.verbose >= 1:
-                    print(f"[CurriculumCallback] Advanced to phase {new_phase}")
+                phase_cfg = self.scheduler.get_phase_config()
+                self.model.get_env().env_method(
+                    "set_curriculum_phase",
+                    int(new_phase),
+                    int(phase_cfg.episode_length_steps),
+                )
+                print(
+                    f"[CurriculumCallback] *** ADVANCED to phase {new_phase} at "
+                    f"step={self.num_timesteps} ***",
+                    flush=True,
+                )
 
         # 3. Save checkpoint at checkpoint_freq intervals
         if (
@@ -117,15 +183,20 @@ class CurriculumCallback(BaseCallback):
         Uses self._lagrangian_model (LagrangianPPO wrapper) when available so
         that both the .zip and _multipliers.pkl are written.  Falls back to
         self.model (inner SB3 PPO) for backward-compatibility in unit tests.
+
+        When self.vecnorm is set, the VecNormalize running stats are persisted
+        alongside the model so that observation normalisation is correctly
+        restored on resume (fixes curriculum-stuck-at-phase-0 bug).
         """
         ts = self.num_timesteps
         save_model = self._lagrangian_model if self._lagrangian_model is not None else self.model
         multipliers = getattr(save_model, "get_multipliers", lambda: {})()
         self.checkpoint_mgr.save(
             model=save_model,
-            vecnorm_stats={"obs_rms": None},  # VecNormalize stats placeholder
+            vecnorm_stats={"obs_rms": None},  # legacy field kept for schema compat
             curriculum_phase=int(self.scheduler.get_phase()),
             lagrange_multipliers=multipliers,
             total_timesteps=ts,
             step=ts,
+            vecnorm=self.vecnorm,  # persist running stats; None is safe (no-op)
         )

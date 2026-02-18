@@ -38,6 +38,18 @@ def recompression_cycle(model_config) -> CycleModel:
 
 
 @pytest.fixture
+def controlled_cycle(model_config) -> CycleModel:
+    """Build a simple cycle with external controller interface enabled."""
+    model_config["controller"] = {
+        "mode": "rl_external",
+        "n_commands": 4,
+        "n_measurements": 14,
+    }
+    builder = SCO2CycleBuilder.from_config(model_config)
+    return builder.build()
+
+
+@pytest.fixture
 def renderer() -> MoFileRenderer:
     return MoFileRenderer()
 
@@ -191,6 +203,24 @@ class TestConnectEquations:
         result = renderer.render(simple_cycle)
         # At least one connect statement referencing main_compressor
         assert "main_compressor." in result
+
+
+class TestControllerInterfaceRendering:
+    def test_render_includes_controller_wrappers(self, renderer, controlled_cycle):
+        result = renderer.render(controlled_cycle)
+        assert "model ControlledRegulator" in result
+        assert "model ControlledTurbine" in result
+        assert "model ControlledFanCooler" in result
+
+    def test_render_includes_command_and_measurement_ports(self, renderer, controlled_cycle):
+        result = renderer.render(controlled_cycle)
+        assert "RealInput commands[4]" in result
+        assert "RealOutput measurements[14]" in result
+
+    def test_render_connects_commands_to_actuator_wrappers(self, renderer, controlled_cycle):
+        result = renderer.render(controlled_cycle)
+        assert "connect(commands[1], regulator.T_set);" in result
+        assert "connect(commands[3], turbine.p_out_set);" in result
 
 
 # ─── render_to_file() ─────────────────────────────────────────────────────────

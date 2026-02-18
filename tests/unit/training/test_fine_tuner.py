@@ -102,6 +102,35 @@ def make_dummy_checkpoint(tmp_path: str, curriculum_phase: int = 0) -> str:
     return meta_path
 
 
+def make_dummy_skrl_checkpoint(tmp_path: str, curriculum_phase: int = 0) -> str:
+    """Create a minimal SKRL-style checkpoint manifest for bridge tests."""
+    import gymnasium as gym
+    import torch
+
+    from sco2rl.surrogate.surrogate_trainer import _Policy, _Value
+
+    obs_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(len(OBS_VARS),), dtype=np.float32)
+    act_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(len(ACTION_VARS),), dtype=np.float32)
+    policy = _Policy(obs_space, act_space, "cpu")
+    value = _Value(obs_space, act_space, "cpu")
+
+    weights_path = os.path.join(tmp_path, "skrl_weights.pt")
+    torch.save({"policy": policy.state_dict(), "value": value.state_dict()}, weights_path)
+
+    meta = {
+        "model_weights": weights_path,
+        "vec_normalize_stats": None,
+        "curriculum_phase": curriculum_phase,
+        "lagrange_multipliers": {},
+        "total_timesteps": 1000,
+    }
+    meta_path = os.path.join(tmp_path, "skrl_checkpoint.json")
+    with open(meta_path, "w") as f:
+        json.dump(meta, f)
+
+    return meta_path
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -113,6 +142,11 @@ def tmp_dir():
 @pytest.fixture
 def checkpoint_path(tmp_dir):
     return make_dummy_checkpoint(tmp_dir)
+
+
+@pytest.fixture
+def skrl_checkpoint_path(tmp_dir):
+    return make_dummy_skrl_checkpoint(tmp_dir)
 
 
 @pytest.fixture
@@ -170,3 +204,9 @@ def test_finetune_increases_total_timesteps(fine_tuner, checkpoint_path):
 def test_model_property_not_none_after_finetune(fine_tuner, checkpoint_path):
     fine_tuner.finetune(checkpoint_path)
     assert fine_tuner.model is not None
+
+
+def test_finetune_accepts_skrl_checkpoint_manifest(fine_tuner, skrl_checkpoint_path):
+    result = fine_tuner.finetune(skrl_checkpoint_path)
+    assert "checkpoint_path" in result
+    assert os.path.isfile(result["checkpoint_path"])

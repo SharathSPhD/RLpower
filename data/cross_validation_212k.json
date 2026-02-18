@@ -1,0 +1,18 @@
+{
+  "rl_mean_reward": 806.6334260954455,
+  "pid_mean_reward": 685.9169191049659,
+  "reward_improvement_pct": 17.599289888901307,
+  "rl_violation_rate": 0.0,
+  "pid_violation_rate": 0.0,
+  "per_phase": [
+    {
+      "phase": 0,
+      "episode_length_steps": 720,
+      "rl_mean_reward": 806.6334260954455,
+      "pid_mean_reward": 685.9169191049659,
+      "reward_improvement_pct": 17.599289888901307,
+      "rl_violation_rate": 0.0,
+      "pid_violation_rate": 0.0
+    }
+  ]
+}

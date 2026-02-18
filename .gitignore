@@ -1,5 +1,7 @@
 .claude/
-# memories/ -- stage memory files are tracked
+# memories/ and docs/ contain internal working files; not part of the public repo
+memories/
+docs/
 
 CLAUDE.md
 MEMORY.md

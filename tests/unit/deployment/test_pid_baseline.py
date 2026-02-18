@@ -84,3 +84,19 @@ def test_predict_deterministic(pid):
     pid.reset()
     a2, _ = pid.predict(obs, deterministic=True)
     np.testing.assert_array_equal(a1, a2)
+
+
+def test_predict_uses_latest_history_slice():
+    from sco2rl.deployment.inference.pid_baseline import PIDBaseline
+
+    cfg = dict(PID_CONFIG)
+    cfg["history_steps"] = 2
+    cfg["n_obs"] = OBS_DIM
+    model = PIDBaseline(cfg)
+    # Oldest frame has zeros; latest frame has measurement values.
+    latest = np.array([33.0, 700.0, 18.0, 7.5, 95.0, 95.0, 12.0, 7.0, 5.0, 0.4, 0.3], dtype=np.float32)
+    obs = np.concatenate([np.zeros_like(latest), latest])
+    action_hist, _ = model.predict(obs)
+    model.reset()
+    action_latest_only, _ = model.predict(latest)
+    np.testing.assert_allclose(action_hist, action_latest_only, atol=1e-6)

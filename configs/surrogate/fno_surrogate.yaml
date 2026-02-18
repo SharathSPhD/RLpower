@@ -10,8 +10,8 @@ sampling:
   seed: 42
   output_file: "artifacts/trajectories/fno_training.h5"
   output_schema:
-    state_shape: "[N, 20, 200]"       # (trajectories, state_vars, time_steps)
-    action_shape: "[N, 5, 199]"       # (trajectories, actions, time_steps-1)
+    state_shape: "[N, 14, 200]"       # (trajectories, state_vars, time_steps)
+    action_shape: "[N, 4, 199]"       # (trajectories, actions, time_steps-1)
     metadata_shape: "[N, 3]"          # (T_exhaust, mdot_exhaust, W_setpoint)
 
   # Parameter ranges for LHS sampling (3 independent parameters)
@@ -38,8 +38,8 @@ fno:
   modes: 16                            # Fourier modes retained (12–16 sufficient for thermal dynamics)
   width: 64                            # Latent channel width
   n_layers: 4                          # Number of Fourier layers
-  input_dim: 25                        # 20 state vars + 5 action vars
-  output_dim: 20                       # 20 next state vars
+  input_dim: 18                        # 14 state vars + 4 action vars
+  output_dim: 14                       # 14 next state vars
   activation: gelu                     # GELU (smoother than ReLU for spectral ops)
   padding: 8                           # Zero-padding to avoid spectral aliasing at boundaries
 
@@ -67,20 +67,29 @@ training:
 # Gate 3 PASS requires ALL criteria to be met
 # Results saved to artifacts/surrogate/fidelity_report.json
 fidelity_gate:
-  max_rmse_normalized: 0.05           # 5% normalized RMSE across all 20 outputs
+  max_rmse_normalized: 0.05           # 5% normalized RMSE across all 14 outputs
   min_r2: 0.97                        # Minimum R² on held-out test set
+  variable_ranges:
+    T_compressor_inlet: 12.0
+    T_compressor_outlet: 73.0
+    T_turbine_inlet: 403.0
+    T_turbine_outlet: 303.0
+    T_recuperator_hot_in: 303.0
+    T_recuperator_cold_in: 73.0
+    T_precooler_inlet: 303.0
+    T_precooler_outlet: 12.0
+    W_turbine: 25.0
+    W_main_compressor: 8.0
+    eta_compressor: 0.22
+    eta_recuperator: 0.28
+    Q_recuperator: 100.0
+    P_high: 10.0
 
   # Extra-tight thresholds for safety-critical variables
   critical_variables:
     - name: T_compressor_inlet
       max_rmse_c: 0.5                 # ±0.5°C near critical point (32.2°C target)
       min_r2: 0.98
-    - name: surge_margin_main
-      max_rmse: 0.01
-      min_r2: 0.90
-    - name: surge_margin_recomp
-      max_rmse: 0.01
-      min_r2: 0.90
     - name: T_turbine_inlet
       max_rmse_c: 5.0                 # ±5°C at turbine inlet
       min_r2: 0.97
@@ -95,6 +104,7 @@ fidelity_gate:
 # ─── SKRL PPO on Surrogate ───────────────────────────────────────────────────
 skrl_ppo:
   n_envs: 1024                        # Vectorized GPU environments
+  timesteps_are_transitions: true     # Convert to trainer timesteps by dividing by n_envs
   rollout_steps: 2048
   learning_epochs: 10
   mini_batches: 8

@@ -65,9 +65,7 @@ class FMUTrainer:
         n_envs:
             Number of parallel FMU environments. n_envs=1 uses DummyVecEnv
             (synchronous, no subprocess overhead — good for unit tests).
-            n_envs>1 uses DummyVecEnv with n_envs workers (production should
-            use SubprocVecEnv via the scripts/train_fmu.py entry point which
-            sets start_method="spawn" for CUDA-safe multiprocessing).
+            n_envs>1 uses SubprocVecEnv with spawn start method.
         """
         cfg = self._config
 
@@ -85,16 +83,17 @@ class FMUTrainer:
             "setpoint": cfg.get("setpoint", {}),
         }
 
-        # Build list of env factory functions (one per worker)
         # Monitor wrapper is required for CurriculumCallback to read episode stats
         # via info["episode"]["r"] (populated by SB3's Monitor, not VecNormalize).
         def make_single_env():
             return Monitor(SCO2FMUEnv(fmu=fmu_factory(), config=env_config))
 
         env_fns = [make_single_env for _ in range(n_envs)]
-
-        # DummyVecEnv for unit tests; production uses SubprocVecEnv externally
-        vec_env = DummyVecEnv(env_fns)
+        vec_env = (
+            DummyVecEnv(env_fns)
+            if n_envs == 1
+            else SubprocVecEnv(env_fns, start_method="spawn")
+        )
 
         # VecNormalize for observation and reward normalisation
         norm_cfg = cfg.get("normalization", {})
@@ -148,10 +147,18 @@ class FMUTrainer:
         phases_cfg = curriculum_cfg.get("phases", [])
         phase_0_cfg = next((p for p in phases_cfg if p.get("id") == 0), {})
         require_zero_violations = advancement_cfg.get("require_zero_constraint_violations", False)
+        # violation_rate_limit_pct (0–100) takes precedence over require_zero_violations
+        viol_pct = advancement_cfg.get("violation_rate_limit_pct", None)
+        if viol_pct is not None:
+            violation_rate_limit = float(viol_pct) / 100.0
+        elif require_zero_violations:
+            violation_rate_limit = 0.0
+        else:
+            violation_rate_limit = 0.05
         observer_cfg = {
             "window_size": advancement_cfg.get("window_episodes", 50),
             "advance_threshold": phase_0_cfg.get("advancement_threshold", 8.0),
-            "violation_rate_limit": 0.0 if require_zero_violations else 0.05,
+            "violation_rate_limit": violation_rate_limit,
             "min_episodes": advancement_cfg.get("window_episodes", 50),
         }
         observer = MetricsObserver(config=observer_cfg)
@@ -185,27 +192,34 @@ class FMUTrainer:
             callback=self._curriculum_callback,
         )
 
-        # Save final checkpoint (RULE-C4: 5 required fields)
+        # Save final checkpoint (RULE-C4: 5 required fields + VecNormalize stats)
         final_phase = int(self._curriculum_callback.scheduler.get_phase())
         ts = self._policy.num_timesteps
         self._checkpoint_mgr.save(
             model=self._policy,
-            vecnorm_stats={"obs_rms": None},  # VecNormalize stats placeholder
+            vecnorm_stats={"obs_rms": None},  # legacy field kept for schema compat
             curriculum_phase=final_phase,
             lagrange_multipliers=self._policy.get_multipliers(),
             total_timesteps=ts,
             step=ts,
+            vecnorm=self._env,  # persist running normalization stats
         )
 
         return self._policy
 
     def evaluate(self, n_episodes: int = 10) -> dict:
-        """Run n_episodes deterministically, return mean reward and violation rate.
+        """Run n_episodes deterministically; return raw mean reward and violation rate.
+
+        The raw episodic return is read from ``info["episode"]["r"]`` populated by
+        the SB3 Monitor wrapper (which records pre-VecNormalize rewards).  This is
+        the same reward signal that the CurriculumCallback/MetricsObserver uses for
+        advancement decisions, so the reported value is directly comparable to the
+        curriculum advancement thresholds.
 
         Returns
         -------
         dict with keys:
-            "mean_reward": float -- mean episode reward across n_episodes
+            "mean_reward": float -- raw mean episode reward across n_episodes
             "violation_rate": float -- fraction of steps with constraint violations
         """
         if self._policy is None or self._env is None:
@@ -214,26 +228,26 @@ class FMUTrainer:
         # Freeze VecNormalize stats during evaluation (deterministic mode)
         self._env.training = False
 
-        episode_rewards = []
+        episode_rewards: list[float] = []
         violation_count = 0
         total_steps = 0
 
         for _ in range(n_episodes):
             obs = self._env.reset()
             done = np.array([False])
-            ep_reward = 0.0
 
             while not done[0]:
                 action, _ = self._policy.predict(obs, deterministic=True)
-                obs, reward, done, info = self._env.step(action)
-                ep_reward += float(reward[0])
+                obs, _norm_reward, done, info = self._env.step(action)
                 total_steps += 1
 
-                # Count violations from info dict if present
-                if info and "violations" in info[0]:
-                    violation_count += int(info[0]["violations"] > 0)
+                if info and "constraint_violation" in info[0]:
+                    violation_count += int(info[0]["constraint_violation"] > 0)
 
-            episode_rewards.append(ep_reward)
+            # Read raw episodic return recorded by Monitor (pre-VecNormalize).
+            # Mirrors the reward used by MetricsObserver for curriculum advancement.
+            raw_ep_reward = float(info[0].get("episode", {}).get("r", 0.0))
+            episode_rewards.append(raw_ep_reward)
 
         # Restore VecNormalize to training mode
         self._env.training = True
@@ -266,15 +280,20 @@ class FMUTrainer:
             (CurriculumPhase.COLD_STARTUP,      0.60,     50,     50,   0.15, 300.0),
             (CurriculumPhase.EMERGENCY_TRIP,    0.55,     50,     50,   0.20, 400.0),
         ]
+        cfg_by_id = {
+            int(phase_cfg.get("id", idx)): phase_cfg
+            for idx, phase_cfg in enumerate(phases_from_cfg)
+        }
         configs = []
         for i, (phase, thresh, min_ep, window, viol_lim, ampl) in enumerate(defaults):
-            override = phases_from_cfg[i] if i < len(phases_from_cfg) else {}
+            override = cfg_by_id.get(int(phase), {})
             configs.append(PhaseConfig(
                 phase=phase,
-                advance_threshold=override.get("advance_threshold", thresh),
+                advance_threshold=override.get("advancement_threshold", thresh),
                 min_episodes=override.get("min_episodes", min_ep),
                 window_size=override.get("window_size", window),
                 violation_rate_limit=override.get("violation_rate_limit", viol_lim),
                 disturbance_amplitude=override.get("disturbance_amplitude", ampl),
+                episode_length_steps=override.get("episode_length_steps", 720),
             ))
         return configs
