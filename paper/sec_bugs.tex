@@ -1,0 +1,194 @@
+\section{Discussion: Five Practitioner Bugs}
+\label{sec:bugs}
+%% ---------------------------------------------------------------------------
+
+The most revealing aspect of this project is how five distinct software
+engineering defects — none of them algorithmic — collectively prevented the
+agent from demonstrating capability that it already possessed.
+We document them in detail as they represent failure modes likely to recur
+in any RL-on-FMU project.
+
+\subsection{Bug 1: VecNormalize Persistence Failure}
+\label{sec:vecnorm}
+
+\textbf{What happened.}
+SB3's \texttt{VecNormalize} maintains a running mean $\mu$ and variance
+$\sigma^2$ across all observations seen during training; observations fed
+to the policy network are normalised to $(\mathbf{s} - \mu)/\sigma$.
+When a checkpoint was saved, the code wrote a null placeholder:
+\begin{verbatim}
+vecnorm_stats = {"obs_rms": None}   # placeholder -- never actual stats
+\end{verbatim}
+On resume, a fresh \texttt{VecNormalize} initialised with $\mu=0$, $\sigma=1$
+was attached to the pre-trained policy.
+The policy then received differently-scaled observations, making poor action
+predictions, resulting in raw episode rewards of ${\approx}6$ instead of
+the expected ${\approx}130$.
+The \texttt{MetricsObserver} never reached the Phase~0 advancement threshold
+of $8.0$ (normalised), and training stalled at Phase~0 for the entire
+2.8M-step resumed run.
+
+\textbf{Fix.}
+\texttt{CheckpointManager.save()} now calls \texttt{vecnorm.save(path)};
+the resume block calls \texttt{VecNormalize.load(path, venv)} before
+relinking the policy.
+
+\textbf{Lesson.}
+Whenever \texttt{VecNormalize} is used, treat the statistics file as a
+first-class artefact alongside the policy weights.
+A simple integration test that saves, reloads, and confirms the first
+post-resume reward is within $\varepsilon$ of the pre-save reward
+catches this class of bug immediately.
+
+\subsection{Bug 2: Episode Boundary Misalignment in CurriculumCallback}
+
+\textbf{What happened.}
+The \texttt{CurriculumCallback} recorded episode completions in its
+\texttt{\_on\_rollout\_end} hook, which fires once per $n_{\text{steps}} = 2{,}048$
+environment steps.
+With episode length of 120 steps and 8 parallel environments, approximately
+$\lfloor 2048/120 \rfloor \times 8 = 136$ episode terminations occur
+within each rollout, but \texttt{\_on\_rollout\_end} inspects only the
+\texttt{infos} from the \emph{final} step of the rollout.
+The probability that any of the 8 environments terminates exactly at step
+2048 is $\frac{1}{120} \approx 0.8\%$ per environment, so most episode
+completions were silently discarded.
+The \texttt{MetricsObserver} recorded near-zero episodes, mean reward
+remained undefined, and curriculum advancement was impossible.
+
+\textbf{Fix.}
+Episode recording moved to \texttt{\_on\_step}, which fires after every
+environment step.
+Each step's \texttt{dones} and \texttt{infos} vectors are inspected;
+when \texttt{dones[i]} is true, the episode return from
+\texttt{infos[i]["episode"]["r"]} is recorded.
+
+\textbf{Lesson.}
+In SB3 with \texttt{SubprocVecEnv}, episode-level statistics must be
+read from \texttt{\_on\_step} (or directly from the Monitor wrapper),
+not from \texttt{\_on\_rollout\_end}.
+The rollout boundary and the episode boundary are almost never aligned
+unless episode length equals \texttt{n\_steps}.
+
+\subsection{Bug 3: Reward Unit Double-Scaling}
+
+\textbf{What happened.}
+\texttt{FMPyAdapter.default\_scale\_offset()} correctly converts the FMU's
+turbine and compressor power outputs from watts to megawatts by applying a
+$10^{-6}$ multiplicative factor to each variable's FMU output before it
+reaches \texttt{SCO2FMUEnv}.
+Independently, the environment configuration (\texttt{env.yaml}) contained:
+\begin{verbatim}
+reward:
+  w_net_unit_scale: 1.0e-6   # (incorrect: FMPyAdapter already converted)
+\end{verbatim}
+The reward function then applied this second $10^{-6}$ factor,
+converting already-in-MW values to $\mu$MW.
+With $W_{\text{net}}$ now in the range $10^{-6}$ MW, the tracking
+reward $r_{\text{track}} = -|W_{\text{net}} - W_{\text{demand}}|$
+was effectively zero regardless of controller performance.
+
+\textbf{Fix.}
+Set \texttt{w\_net\_unit\_scale: 1.0} and add a comment explaining that
+\texttt{FMPyAdapter} owns the unit conversion.
+
+\textbf{Lesson.}
+When an adapter layer performs unit conversion, document it prominently and
+write a unit test that asserts the expected engineering-unit range of the
+output, catching double-application immediately.
+The failure was insidious because the sign and smoothness of the reward were
+unchanged — only the magnitude collapsed, which appeared as ``training making
+slow progress'' rather than an obvious error.
+
+\subsection{Bug 4: Stale Disturbance Profile on Phase Transition}
+
+\textbf{What happened.}
+\texttt{SCO2FMUEnv.\_disturbance\_profile} is constructed once during
+\texttt{reset()} by \texttt{\_build\_disturbance\_profile()}, which reads
+phase-specific parameters from the curriculum config.
+When the \texttt{CurriculumCallback} advanced the curriculum mid-episode
+by calling \texttt{set\_curriculum\_phase()}, the internal phase index
+was updated but \texttt{\_disturbance\_profile} was not rebuilt.
+Subsequent steps in the same episode called
+\texttt{\_apply\_curriculum\_disturbance()} with the new phase index but
+the old profile dictionary, raising:
+\begin{verbatim}
+KeyError: 'ambient_amplitude'   # Phase 2 key absent from Phase 0 profile
+\end{verbatim}
+This crashed the worker process, producing a zombie subprocess.
+
+\textbf{Fix.}
+\texttt{set\_curriculum\_phase()} now calls
+\texttt{self.\_disturbance\_profile = self.\_build\_disturbance\_profile()}
+immediately after updating \texttt{self.\_curriculum\_phase}.
+
+\textbf{Lesson.}
+Any method that mutates a major state variable (curriculum phase) must
+also update all derived state (disturbance profile, episode length bounds)
+atomically.
+Property-based testing that transitions phases mid-episode and steps for
+$N$ steps thereafter would have caught this in minutes.
+
+\subsection{Bug 5: Zero-Violation Advancement Gate}
+
+\textbf{What happened.}
+The curriculum advancement config contained:
+\begin{verbatim}
+require_zero_constraint_violations: true
+\end{verbatim}
+\texttt{FMUTrainer} translated this to \texttt{violation\_rate\_limit = 0.0}.
+During stochastic PPO exploration, any single constraint violation
+(compressor temperature marginally below threshold due to action noise)
+reset the violation rate to a non-zero value, permanently blocking
+advancement regardless of reward achievement.
+Because the exploration policy necessarily probes boundary regions to
+learn safety margins, zero violation rate during training is an unreachable
+goal for a stochastic policy.
+
+\textbf{Fix.}
+Changed to \texttt{require\_zero\_constraint\_violations: false} with
+\texttt{violation\_rate\_limit\_pct: 10.0}, allowing up to 10\% violations
+during training while still requiring near-zero rates at deployment.
+Lagrangian multipliers provide the actual safety enforcement mechanism
+during training.
+
+\textbf{Lesson.}
+Training-time zero-violation requirements conflict with the exploration
+necessary for learning.
+Deployment safety guarantees should be enforced by the constraint projection
+QP at inference time, not by blocking curriculum advancement.
+
+\subsection{Comparison with Related Gym--FMU Work}
+
+ModelicaGym~\cite{modelicagym} validates on Cart-Pole and does not address
+curriculum learning or Lagrangian constraints.
+BOPTEST-Gym~\cite{boptestgym} targets building energy with fixed reward
+formulations and no safety projection layer.
+FMUGym~\cite{fmugym} and OpenModelica-Microgrid-Gym~\cite{ommicrogrid}
+cover electrical networks.
+The closest related system, Zhu et al.~\cite{zhu2024fno}, applies FNO-based
+MPC to sCO$_2$ dynamics but does not include an open-source Gym environment,
+a curriculum, or a deployment artefact.
+
+sCO2RL is, to our knowledge, the first publicly available framework
+combining FMU-faithful sCO$_2$ simulation, structured curriculum RL,
+Lagrangian safe constraints, GPU-surrogate training, and sub-millisecond
+TensorRT deployment.
+
+\subsection{Surrogate Fidelity Failure Analysis}
+
+The FNO surrogate achieved overall $R^2 = -77.15$, indicating it
+is worse than a mean predictor.
+Two contributing factors:
+(i)~\emph{Dataset quality}: the 75{,}000-sample dataset was created by
+upsampling a smaller collection; the FNO memorised repeating patterns
+rather than learning the underlying dynamics.
+(ii)~\emph{Distribution mismatch}: uniform LHS sampling does not
+respect the stiffness of the sCO$_2$ equations near the critical region;
+trajectories crossing critical-point isotherms need overrepresentation.
+
+Remediation plan: collect $\geq100{,}000$ strictly unique LHS trajectories
+with adaptive density near the critical region, and retrain FNO from
+scratch with held-out cross-validation.
+
+%% ---------------------------------------------------------------------------

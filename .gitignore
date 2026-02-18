@@ -64,6 +64,17 @@ htmlcov/
 *.log
 logs/
 
+# ─── LaTeX build artifacts (paper source and figures ARE committed) ───────────
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.toc
+paper/*.out
+paper/*.synctex.gz
+paper/sco2rl_arxiv.zip
+
 # ─── Docker ───────────────────────────────────────────────────────────────────
 # .dockerignore is committed (needed for docker build context)
 

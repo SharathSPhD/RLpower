@@ -22,6 +22,7 @@ Design constraints:
 """
 from __future__ import annotations
 
+import random
 from collections import defaultdict
 from typing import Any
 
@@ -47,6 +48,15 @@ class CurriculumCallback(BaseCallback):
         May be None if not using observation normalization.
     verbose:
         SB3 verbosity level.
+    interleave_ratio:
+        When the curriculum is at Phase 6, fraction of workers that will be
+        redirected to a randomly sampled earlier phase (0–5) after each episode
+        completion.  0.0 disables interleaving (default / backward-compatible).
+        Only Phase-6 episodes (not replay episodes) are recorded in the
+        MetricsObserver so advancement accounting is unaffected.
+    phase_steps:
+        Mapping of phase_id → episode_length_steps, required when
+        interleave_ratio > 0 so replay episodes use the correct episode length.
     """
 
     def __init__(
@@ -58,6 +68,8 @@ class CurriculumCallback(BaseCallback):
         vecnorm: Any | None = None,
         lagrangian_model: Any | None = None,
         verbose: int = 0,
+        interleave_ratio: float = 0.0,
+        phase_steps: dict[int, int] | None = None,
     ) -> None:
         super().__init__(verbose=verbose)
         self.scheduler = scheduler
@@ -68,6 +80,13 @@ class CurriculumCallback(BaseCallback):
         # LagrangianPPO wrapper reference; self.model is the INNER SB3 PPO
         # (set by SB3 during learn()). We need the wrapper to save multipliers.
         self._lagrangian_model = lagrangian_model
+
+        # Interleaved curriculum replay
+        self.interleave_ratio: float = float(interleave_ratio)
+        self._phase_steps: dict[int, int] = phase_steps or {}
+        # Per-worker tracking: which phase is the worker currently running?
+        # Populated lazily on first done signal (n_envs not known until learn()).
+        self._worker_phase: dict[int, int] = {}
 
         # Track last checkpoint timestep to compute intervals
         self._last_checkpoint_at: int = 0
@@ -87,31 +106,83 @@ class CurriculumCallback(BaseCallback):
         _on_rollout_end) to avoid missing episodes whose boundaries do not
         coincide with the rollout boundary.  Also accumulates per-step
         constraint violations for the Lagrange multiplier update.
+
+        When interleave_ratio > 0 and the curriculum is at Phase 6, workers
+        that finish an episode are probabilistically assigned to replay an
+        earlier phase (0–5) for their next episode.  Only Phase-6 episodes
+        are fed to MetricsObserver so advancement thresholds are evaluated
+        against the target phase, not the replay phases.
         """
         infos = self.locals.get("infos", [])
         dones = self.locals.get("dones", np.zeros(len(infos), dtype=bool))
+        current_phase = self.scheduler.get_phase()
 
-        for info, done in zip(infos, dones):
+        for idx, (info, done) in enumerate(zip(infos, dones)):
             if not done:
                 continue
+
             ep_info = info.get("episode", {})
             reward = float(ep_info.get("r", 0.0))
             violation = float(info.get("constraint_violation", 0.0))
-            self.observer.record_episode(reward=reward, violation_fraction=violation)
+
+            # Determine which phase this worker was running
+            ep_phase = self._worker_phase.get(idx, current_phase)
+
+            # Only count target-phase episodes in MetricsObserver so that
+            # replay episodes don't distort the advancement window.
+            if ep_phase == current_phase:
+                self.observer.record_episode(reward=reward, violation_fraction=violation)
 
             # Accumulate per-episode constraint violations for Lagrange update
+            # (include all episodes regardless of phase — Lagrange safety is global)
             violations = info.get("constraint_violations", {})
             if isinstance(violations, dict):
                 for key, value in violations.items():
                     self._rollout_violation_sums[str(key)] += float(value)
                 self._rollout_violation_count += 1
 
+            # ── Interleaved replay: reassign this worker's next episode phase ──
+            if (
+                current_phase == 6
+                and self.interleave_ratio > 0.0
+                and self._phase_steps
+            ):
+                if random.random() < self.interleave_ratio:
+                    replay_ph = random.randint(0, 5)
+                    replay_steps = self._phase_steps.get(replay_ph, 360)
+                    try:
+                        self.training_env.env_method(
+                            "set_curriculum_phase",
+                            int(replay_ph),
+                            int(replay_steps),
+                            indices=[idx],
+                        )
+                        self._worker_phase[idx] = replay_ph
+                    except Exception:
+                        pass  # non-fatal: worker stays on current phase
+                else:
+                    # Restore worker to current phase if it was on a replay phase
+                    if self._worker_phase.get(idx, current_phase) != current_phase:
+                        current_steps = self._phase_steps.get(current_phase, 360)
+                        try:
+                            self.training_env.env_method(
+                                "set_curriculum_phase",
+                                int(current_phase),
+                                int(current_steps),
+                                indices=[idx],
+                            )
+                        except Exception:
+                            pass
+                    self._worker_phase[idx] = current_phase
+            else:
+                self._worker_phase[idx] = current_phase
+
         # Periodic diagnostic logging every _log_episode_interval episodes
         n_ep = self.observer.n_episodes
         if n_ep > 0 and n_ep - self._last_logged_episodes >= self._log_episode_interval:
             mean_r = self.observer.get_mean_reward()
             viol_r = self.observer.get_violation_rate()
-            phase = self.scheduler.get_phase()
+            phase = current_phase
             print(
                 f"[CurriculumCallback] step={self.num_timesteps} phase={phase} "
                 f"episodes={n_ep} mean_reward={mean_r:.2f} "

@@ -1,0 +1,62 @@
+\section{Introduction}
+%% ---------------------------------------------------------------------------
+
+Steel manufacturing accounts for approximately 7--8\% of global CO$_2$
+emissions~\cite{worldsteel2023}.
+Electric arc furnaces (EAF) and basic oxygen furnaces (BOF) expel exhaust
+streams that oscillate between 200\textdegree{}C and 1{,}200\textdegree{}C
+with cycle periods of 1--15 minutes.
+Recovering this thermal energy via a power cycle could displace significant
+grid electricity, but the extreme transients make control exceptionally
+challenging.
+
+Supercritical CO$_2$ power cycles~\cite{dostal2004} are an attractive
+bottoming cycle for this application: operating above the CO$_2$ critical
+point (31.1\textdegree{}C, 7.38~MPa) enables efficiencies of 27--40\% at
+compact turbomachinery scale (10--100$\times$ smaller than steam equivalents)
+that makes the technology cost-competitive at industrial waste heat magnitudes.
+However, the fluid's near-critical thermodynamic properties introduce severe
+nonlinearity: specific heat peaks at 29.6~kJ\,kg$^{-1}$\,K$^{-1}$ near
+35\textdegree{}C/80~bar, so a 1.5\textdegree{}C compressor inlet temperature
+drop demands 6\% more cooling power, while a 1.5\textdegree{}C increase
+requires 18\% less — a strongly asymmetric gain that defeats fixed-gain PID
+tuning during furnace transients~\cite{sco2review2021}.
+
+Reinforcement learning (RL) offers an adaptive alternative: an agent trained
+on a physics-faithful digital twin can learn to anticipate and exploit
+thermodynamic nonlinearities without requiring an explicit system model.
+Related work has demonstrated RL on building energy systems via
+Modelica/FMU environments~\cite{modelicagym,boptestgym}, and on organic
+Rankine cycle superheat control for internal combustion engine
+exhaust~\cite{wang2020orc}.
+More recently, Zhu et al.~\cite{zhu2024fno} combined Fourier Neural Operators
+with reinforcement learning PI control for sCO$_2$ cycle dynamics, while a
+comprehensive review by Liu et al.~\cite{sco2review2021} identifies advanced
+data-driven control as a key research direction.
+The EU-funded iSOP doctoral network (Horizon Europe grant 101073266) trains
+15 researchers specifically on sCO$_2$ transient modelling and novel control
+strategies~\cite{isop2024}, underscoring community recognition of this gap.
+
+Despite this growing interest, to our knowledge no publicly available framework
+combines (i)~a physics-faithful OpenModelica-exported sCO$_2$ FMU,
+(ii)~structured curriculum RL with safety constraints,
+and (iii)~a sub-millisecond deployment path.
+sCO2RL fills this gap.
+
+\textbf{Contributions.}
+\begin{enumerate}
+  \item A publicly available Gymnasium environment wrapping an
+        OpenModelica-exported sCO$_2$ FMU with a 7-phase structured
+        curriculum and Lagrangian safety constraints.
+  \item PPO with trainable Lagrangian constraint multipliers for
+        safe operation near the CO$_2$ critical region.
+  \item An FNO surrogate path enabling GPU-vectorised training
+        (${\approx}10^6$ steps/s vs.\ ${\approx}800$ steps/s on CPU FMU).
+  \item A TensorRT-FP16 deployment artefact achieving p99 $<1$~ms.
+  \item An honest, detailed diagnosis of five training infrastructure
+        defects encountered in practice — including episode boundary
+        misalignment, reward unit double-scaling, and normalisation
+        persistence failure — as concrete practitioner guidance.
+\end{enumerate}
+
+%% ---------------------------------------------------------------------------

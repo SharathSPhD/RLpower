@@ -1,0 +1,69 @@
+\section{Method}
+%% ---------------------------------------------------------------------------
+
+\subsection{Reward Function}
+
+The reward decomposes into tracking, smoothness, and constraint terms:
+\begin{align}
+  r_t &= r_{\text{track}} + r_{\text{smooth}} + r_{\text{constraint}} \\
+  r_{\text{track}} &= -|W_{\text{net,MW}} - W_{\text{demand}}|
+                      \;\cdot\; w_{\text{track}} \\
+  r_{\text{smooth}} &= -\|\Delta a_t\|^2 \;\cdot\; w_{\text{smooth}} \\
+  r_{\text{constraint}} &= -\sum_i \lambda_i \cdot \mathbb{1}[\text{violation}_i]
+\end{align}
+where $W_{\text{net,MW}}$ is net shaft power in MW (converted from the FMU's
+SI watts by \texttt{FMPyAdapter}), $W_{\text{demand}}$ is the instantaneous
+demand setpoint, and $\lambda_i$ are the Lagrange multipliers updated online.
+
+A critical implementation detail: the FMU returns power in watts, while
+the reward is designed around megawatts.
+The \texttt{FMPyAdapter.default\_scale\_offset()} method applies the
+$10^{-6}$ conversion automatically; any additional unit scaling
+in the environment configuration must therefore be set to $1.0$.
+Failure to observe this leads to a double-scaling bug that reduces
+$r_{\text{track}}$ to order $10^{-6}$, effectively zeroing the reward signal
+(see Section~\ref{sec:bugs}).
+
+\subsection{Lagrangian Constraint Formulation}
+
+Each constraint $c_i(s, a) \leq 0$ is enforced via a trainable multiplier
+$\lambda_i \geq 0$:
+\begin{equation}
+  \mathcal{L}(\theta, \lambda) = J_r(\theta) - \sum_i \lambda_i \cdot J_{c_i}(\theta)
+\end{equation}
+where $J_r$ is the reward objective and $J_{c_i}$ is the expected cost.
+Policy parameters $\theta$ are updated via gradient ascent on $\mathcal{L}$;
+multipliers $\lambda_i$ are updated via gradient ascent on $-\mathcal{L}$
+(dual ascent), increasing the penalty when violations occur and relaxing it
+when the constraint is comfortably satisfied.
+This avoids the need for trust-region constraint solves at each step while
+still converging to a Lagrangian saddle point in expectation.
+
+\subsection{Curriculum Phases}
+\label{sec:curriculum}
+
+\begin{table}[h]
+\centering
+\caption{Seven-phase curriculum design.}
+\label{tab:curriculum}
+\begin{tabular}{clcc}
+\toprule
+Phase & Scenario & Episode length & Advance threshold \\
+\midrule
+0 & Steady-state optimisation & 120 steps & 8.0 reward \\
+1 & $\pm30\%$ gradual load following & 360 steps & 60.0 reward \\
+2 & $\pm10$\textdegree{}C ambient disturbance & 720 steps & 120.0 reward \\
+3 & EAF heat source transients & 1{,}080 steps & 250.0 reward \\
+4 & 50\% rapid load rejection (30~s) & 360 steps & 50.0 reward \\
+5 & Cold startup through critical region & 720 steps & 80.0 reward \\
+6 & Emergency turbine trip recovery & 1{,}200 steps & 300.0 reward \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Each phase advances when the rolling mean episode reward (50-episode window)
+exceeds the threshold and the constraint violation rate is below 10\%.
+Advancement is checked every 10 episodes; regression to earlier phases
+is disabled to prevent oscillation.
+
+%% ---------------------------------------------------------------------------

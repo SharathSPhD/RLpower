@@ -1,0 +1,52 @@
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+%% ---------------------------------------------------------------------------
+
+We have demonstrated a complete RL control pipeline for sCO$_2$ waste-heat
+recovery that:
+\begin{itemize}
+  \item Successfully traverses all 7 curriculum phases (Phases 0--6) within
+        229{,}376 training steps once infrastructure bugs are resolved, and
+        completes a 5{,}013{,}504-step training run with final evaluation
+        reward 412.7 and zero constraint violations.
+  \item Achieves \textbf{+24--29\% improvement} over PID in Phases~0--2
+        (steady-state, gradual load following, ambient disturbance) with
+        zero constraint violations across all 70~evaluation episodes.
+  \item Reveals a \textbf{curriculum phase imbalance failure mode}: spending
+        95\% of training in Phase~6 causes catastrophic forgetting of
+        Phases~3--5 skills, a finding with broad applicability to non-interleaved
+        curriculum RL.
+  \item Satisfies deployment latency requirements with p99 = 0.046~ms
+        ($22\times$ margin against the 1~ms SLA), providing a production-ready
+        inference artefact.
+\end{itemize}
+
+The five practitioner bugs documented in Section~\ref{sec:bugs} represent
+the most practically useful contribution: they are not algorithmic failures
+but engineering failures in the training infrastructure, each with a clear
+diagnosis, fix, and detection strategy for future practitioners.
+
+Two further training experiments are in progress or planned:
+\begin{enumerate}
+  \item \textbf{Interleaved curriculum training (in progress).}
+        A supplementary 3M-step run resumes from the 5M checkpoint with
+        per-worker phase interleaving (30\% of Phase-6 workers periodically
+        replay a random Phase~0--5 episode) implemented via the new
+        \texttt{interleave\_ratio} parameter in \texttt{CurriculumCallback}.
+        Results will be reported as an addendum; regardless of per-phase
+        outcome, both result sets (5M-only and interleaved) will be preserved
+        in the final manuscript as they quantify the forgetting effect and
+        its remediation.
+  \item \textbf{Surrogate dataset collection and retraining.}
+        Collect $100{,}000$ strictly unique LHS FMU trajectories with
+        critical-region oversampling and retrain FNO; target $R^2 > 0.8$.
+        This would enable GPU-vectorised training at ${\sim}10^6$~steps/s,
+        reducing wall-clock time by ${\sim}2000\times$.
+\end{enumerate}
+
+Interactive Jupyter notebooks demonstrating cycle analysis, reward shaping
+diagnostics, surrogate validation, and policy evaluation are provided
+alongside the code release, enabling reproducible exploration without an
+FMU runtime via Google Colab.
+
+%% ---------------------------------------------------------------------------

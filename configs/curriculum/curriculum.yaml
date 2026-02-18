@@ -8,6 +8,7 @@ advancement:
   violation_rate_limit_pct: 10.0        # Allow up to 10% violation rate (stochastic exploration)
   check_frequency_episodes: 10          # Evaluate advancement every N episodes
   allow_regression: false               # CurriculumPhase state machine: no backward transitions
+  interleave_ratio: 0.30               # During Phase 6: 30% of workers replay random earlier phase
 
 # ─── Phase Definitions ────────────────────────────────────────────────────────
 phases:

@@ -1,0 +1,44 @@
+\section{Related Work}
+%% ---------------------------------------------------------------------------
+
+\subsection{RL for Thermodynamic Cycle Control}
+
+Deep RL has been applied to related thermodynamic control problems.
+Wang et al.~\cite{wang2020orc} demonstrated that a soft actor-critic agent
+outperforms PID control for ORC superheat regulation under highly transient
+internal combustion engine exhaust, achieving superior generalisation to
+unseen disturbance profiles.
+A 2022 study on sCO$_2$ recompression cycle control~\cite{sco2compare2021}
+compared multiple conventional control strategies (PI, feedforward, combined)
+during load-following transients, establishing the baseline landscape that RL
+must surpass.
+
+For the sCO$_2$ cycle specifically, Zhu et al.~\cite{zhu2024fno} recently
+applied Fourier Neural Operators to characterise open-loop transient dynamics
+and embed the learned model in a Model Predictive Controller, demonstrating
+that the printed circuit heat exchanger outlet temperature exhibits non-minimum
+phase characteristics that defeat simple PI feedback — precisely the scenario
+our RL curriculum is designed to handle.
+
+\subsection{FMU-Based RL Environments}
+
+ModelicaGym~\cite{modelicagym} provides a Gym wrapper for Modelica FMUs
+validated on Cart-Pole.
+BOPTEST-Gym~\cite{boptestgym} targets building HVAC systems with FMU
+simulation; its benchmarking framework informs our evaluation approach.
+FMUGym~\cite{fmugym} and OpenModelica-Microgrid-Gym~\cite{ommicrogrid}
+cover electrical power networks.
+None of these frameworks address thermodynamic power cycles, curriculum
+learning, or Lagrangian safety constraints.
+
+\subsection{Lagrangian Safe RL}
+
+Constrained Policy Optimisation (CPO)~\cite{achiam2017cpo} established
+the theoretical foundation for policy search with hard constraints.
+Our Lagrangian relaxation approach maintains trainable multipliers
+$\lambda_c \geq 0$ updated via gradient ascent on the constraint dual,
+providing a practical implementation that does not require trust-region
+solves at each step while still converging to constraint satisfaction in
+training.
+
+%% ---------------------------------------------------------------------------

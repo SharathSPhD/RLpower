@@ -167,6 +167,15 @@ class FMUTrainer:
         scheduler = CurriculumScheduler(phase_configs=phase_configs, observer=observer)
 
         checkpoint_freq = cfg.get("checkpoint_freq", 100_000)
+
+        # Build phase_steps map for interleaved replay (phase_id → episode_length_steps)
+        phase_steps = {
+            int(p["id"]): int(p.get("episode_length_steps", 360))
+            for p in phases_cfg
+            if "id" in p
+        }
+        interleave_ratio = float(advancement_cfg.get("interleave_ratio", 0.0))
+
         self._curriculum_callback = CurriculumCallback(
             scheduler=scheduler,
             observer=observer,
@@ -175,6 +184,8 @@ class FMUTrainer:
             vecnorm=self._env,
             lagrangian_model=self._policy,
             verbose=cfg.get("verbose", 0),
+            interleave_ratio=interleave_ratio,
+            phase_steps=phase_steps,
         )
 
     def train(self, total_timesteps: int) -> LagrangianPPO:

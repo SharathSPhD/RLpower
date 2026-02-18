@@ -3,6 +3,7 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/SharathSPhD/RLpower/blob/main/notebooks/04_policy_evaluation.ipynb)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-b31b1b.svg)](https://arxiv.org/abs/XXXX.XXXXX)
 
 Deep reinforcement learning for autonomous control of a **supercritical CO₂ (sCO₂) simple recuperated Brayton cycle** recovering waste heat from steel industry electric arc furnace (EAF) and basic oxygen furnace (BOF) exhaust (200–1,200°C).
 
@@ -10,11 +11,12 @@ Deep reinforcement learning for autonomous control of a **supercritical CO₂ (s
 
 | Metric | Value |
 |--------|-------|
-| RL vs PID improvement (steady-state) | **+17.6%** (806.6 vs 685.9 reward) |
+| RL vs PID improvement (Phases 0–2) | **+24–29%** (steady-state, gradual load, ambient disturbance) |
 | Curriculum phases traversed | **7/7** (Phase 0 → 6) within 229,376 steps |
-| Phase 6 mean reward (emergency turbine trip) | **399.9** |
-| Constraint violation rate | **0.000** |
+| Phase 6 mean reward (emergency turbine trip) | **412.7** |
+| Constraint violations (all 70 eval episodes) | **0.000** (Lagrangian safety mechanism) |
 | TensorRT p99 inference latency | **0.046 ms** (22× under 1 ms SLA) |
+| Interleaved replay run | **In progress** (3M steps; prevents catastrophic forgetting) |
 
 ## What this repository provides
 

@@ -1,0 +1,133 @@
+\section{System Architecture}
+%% ---------------------------------------------------------------------------
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.90\linewidth]{figures/cycle_diagram.png}
+  \caption{%
+    Simple recuperated sCO$_2$ Brayton cycle schematic.
+    The clockwise flow path connects: heat source (EAF/BOF exhaust,
+    200--1200\textdegree{}C) $\to$ turbine [2] $\to$ recuperator hot side [4,5]
+    $\to$ pre-cooler [5$\to$1] $\to$ main compressor [1$\to$2] $\to$ recuperator
+    cold side [2$\to$3] $\to$ heat source.
+    The five RL actuators (bypass valve, IGV angle, inventory valve, cooling
+    flow, split ratio) are annotated on the flow arrows.
+    Critical safety constraint: compressor inlet must remain above 33\textdegree{}C
+    (1.9\textdegree{}C above the CO$_2$ critical point).%
+  }
+  \label{fig:cycle_schematic}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.78\linewidth]{figures/cycle_ts_diagram.png}
+  \caption{%
+    CO$_2$ temperature-entropy (T-s) diagram showing the saturation dome
+    (blue), six reference state points at the design operating point
+    (P$_{\text{high}}$=20~MPa, P$_{\text{low}}$=7.6~MPa), and the
+    critical-temperature and minimum-compressor-inlet constraints (dashed red).
+    Near-critical specific heat peaks ($c_p\!\approx\!29.6$~kJ/(kg$\cdot$K)
+    at 35\textdegree{}C/80~bar) create the asymmetric nonlinearity that
+    motivates RL control.%
+  }
+  \label{fig:cycle_ts}
+\end{figure}
+
+\subsection{Physics Simulation Layer}
+
+The base environment is a \emph{simple recuperated} sCO$_2$ Brayton cycle
+(Figures~\ref{fig:cycle_schematic} and~\ref{fig:cycle_ts})
+modelled in OpenModelica (OM~1.23) using ThermoPower~\cite{thermopower} and
+ExternalMedia~\cite{externalmedia} with the CoolProp Span--Wagner
+CO$_2$ EOS~\cite{coolprop}.
+The model is exported as an FMI~2.0 Co-Simulation FMU with the CVODE
+stiff solver embedded (\texttt{--fmiFlags=s:cvode}, relative tolerance $10^{-4}$).
+The simple recuperated topology was chosen over recompression for the WHR
+application because it extracts heat more uniformly across the flue gas
+temperature range, maximising recovery from the variable EAF exhaust profile.
+
+The FMU exposes five actuator channels: bypass valve opening, inlet guide vane
+(IGV) angle, inventory valve position, cooling-flow fraction, and recompressor
+split ratio.
+Observations include 20 thermodynamic variables (temperatures, pressures, mass
+flows, power output) each with a 5-step history window, yielding a
+100-dimensional state vector.
+
+Five critical engineering constraints are enforced:
+\begin{itemize}
+  \item Compressor inlet temperature $T_{\text{ci}} \geq 32.2$\textdegree{}C
+        (1.1\textdegree{}C above the critical point).
+        Dropping below 31.5\textdegree{}C triggers immediate episode
+        termination with reward $-100$.
+  \item Surge margin $\sigma \geq 0.05$ to prevent compressor stall.
+  \item Turbine inlet temperature within design envelope.
+  \item High-side pressure within mechanical limits.
+  \item Net power output non-negative (no parasitic consumption).
+\end{itemize}
+
+\subsection{Gymnasium Environment}
+
+\texttt{SCO2FMUEnv} wraps the FMU via FMPy (preferred over PyFMI for its
+zero-C-extension installation) with an explicit unit-conversion layer
+(\texttt{FMPyAdapter.default\_scale\_offset()}) that converts FMU-native
+SI units (watts) to engineering units (MW) \emph{before} the reward
+function observes them.
+Key components:
+\begin{itemize}
+  \item \textbf{Observation}: 20 variables $\times$ 5 history steps
+        $= 100$-dimensional input vector.
+  \item \textbf{Action}: 5-dimensional continuous in $[-1,1]$, decoded to
+        physical ranges and rate-limited to prevent actuator damage.
+  \item \textbf{Normalisation}: SB3 \texttt{VecNormalize} with running
+        mean/variance across all 8~parallel environments;
+        must be persisted alongside policy weights at every checkpoint
+        (see Section~\ref{sec:bugs}).
+  \item \textbf{Reward}: $r = r_{\text{tracking}} + r_{\text{smooth}} - r_{\text{constraint}}$,
+        where $r_{\text{tracking}}$ rewards net power output towards the
+        demand setpoint, $r_{\text{smooth}}$ penalises excessive actuator
+        movement, and $r_{\text{constraint}}$ penalises physical limit violations.
+\end{itemize}
+
+\subsection{RL Training}
+
+PPO~\cite{schulman2017} is implemented via Stable-Baselines3~\cite{sb3} with
+Lagrangian constraint multipliers~\cite{achiam2017cpo} attached as trainable
+parameters $\lambda_c \geq 0$ updated online from per-step violation signals.
+The actor and critic share an MLP backbone with hidden layers $[256, 256, 128]$
+(${\approx}400$K parameters).
+Key hyperparameters: clip $\varepsilon = 0.2$, GAE $\lambda_{\text{GAE}} = 0.95$,
+$\gamma = 0.99$, learning rate $3\times10^{-4}$ (linear decay),
+mini-batch 256, epochs 10, rollout steps $n_{\text{steps}} = 2{,}048$.
+
+Training uses two parallel paths:
+\begin{enumerate}
+  \item \textbf{FMU path}: SB3 PPO + \texttt{SubprocVecEnv}
+        (8 parallel FMU instances on CPU); throughput ${\approx}530$~steps/s.
+  \item \textbf{Surrogate path}: SKRL PPO + 1{,}024-way GPU vectorisation
+        backed by an FNO surrogate; throughput ${\approx}10^6$~steps/s.
+\end{enumerate}
+
+\subsection{Curriculum Learning}
+
+A 7-phase curriculum progressively exposes the agent to harder scenarios:
+Phase~0 (steady-state optimisation) through Phase~6 (emergency turbine trip
+recovery with rapid load rejection).
+Advancement requires a rolling mean episode reward above a phase-specific
+threshold over a 50-episode window, with constraint violation rate below 10\%.
+
+\subsection{Surrogate Model}
+
+The FNO~\cite{fno2021} is a 1-D operator learning model that maps
+$(s_t, a_t) \mapsto s_{t+1}$ in normalised coordinates.
+Architecture: 4~Fourier layers, 64~modes, 128~width, GELU activation.
+After GPU-surrogate training, 500K fine-tuning steps on the live FMU
+correct surrogate bias.
+
+\subsection{Deployment Path}
+
+The final PyTorch policy is exported to ONNX then compiled to TensorRT FP16
+for edge inference.
+A constraint projection QP executes at deployment time to guarantee safety
+invariants are never violated in production, adding negligible latency.
+
+%% ---------------------------------------------------------------------------
