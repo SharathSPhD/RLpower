@@ -59,9 +59,9 @@ def _import_physicsnemo_fno():
     tried = ", ".join("{}.{}".format(m, c) for m, c in candidates)
     raise ImportError(
         "PhysicsNeMo FNO not found. Install with:\n"
-        "  pip install physicsnemo\n"
+        "  pip install nvidia-physicsnemo\n"
         "or inside the Docker image:\n"
-        "  pip install --no-cache-dir physicsnemo\n\n"
+        "  pip install --no-cache-dir nvidia-physicsnemo\n\n"
         "Tried: " + tried
     )
 
@@ -260,7 +260,7 @@ class _RemovedClass:
     def __init__(self, *args, **kwargs):
         raise ImportError(
             self.__class__.__name__ + " has been removed. "
-            "Use SCO2SurrogateFNO (physicsnemo-backed) instead."
+            "Use SCO2SurrogateFNO (nvidia-physicsnemo-backed) instead."
         )
 
 

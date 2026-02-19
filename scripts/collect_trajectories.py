@@ -61,7 +61,12 @@ def _collect_batch_worker(args: tuple) -> list[dict]:
         step_size=5.0,
     )
     env = SCO2FMUEnv(fmu=fmu, config=env_config)
-    collector = TrajectoryCollector(env=env, config=collector_config, seed=seed)
+    collector = TrajectoryCollector(
+        env=env,
+        config=collector_config,
+        seed=seed,
+        raw_obs_dim=len(obs_vars),
+    )
     try:
         return collector.collect_batch(batch_samples)
     finally:
@@ -78,6 +83,12 @@ def parse_args():
                    help="Parallel FMU worker processes (default: 8)")
     p.add_argument("--batch-size", type=int, default=100,
                    help="Trajectories per worker task (default: 100)")
+    p.add_argument(
+        "--episode-max-steps",
+        type=int,
+        default=None,
+        help="Override episode length for data collection (default: env.yaml value)",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--verbose", type=int, default=0)
     return p.parse_args()
@@ -114,8 +125,14 @@ def load_configs(project_root: Path) -> dict:
 
     hard = safety_cfg.get("hard_constraints", {})
     safety = {
-        "T_compressor_inlet_min": hard.get("T_compressor_inlet_min_c", 32.2),
-        "surge_margin_min": hard.get("surge_margin_min_fraction", 0.05),
+        "T_compressor_inlet_min": hard.get(
+            "compressor_inlet_temp_min_c",
+            hard.get("T_compressor_inlet_min_c", 32.2),
+        ),
+        "surge_margin_min": hard.get(
+            "surge_margin_main_min",
+            hard.get("surge_margin_min_fraction", 0.05),
+        ),
     }
 
     episode = env_cfg.get("episode", {})
@@ -157,7 +174,11 @@ def main():
     obs_bounds = cfg["obs_bounds"]
     action_vars = cfg["action_vars"]
     action_config = cfg["action_config"]
-    episode_max_steps = cfg["episode"].get("max_steps", 720)
+    episode_max_steps = int(
+        args.episode_max_steps
+        if args.episode_max_steps is not None
+        else cfg["episode"].get("max_steps", 720)
+    )
     history_steps = cfg["obs_section"].get("history_steps", 5)
 
     print(f"[collect_trajectories] FMU: {fmu_path}")

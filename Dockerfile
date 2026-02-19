@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.4
 # sCO₂ RL — Multi-stage ARM64 build for NVIDIA DGX Spark (GB10 Grace Blackwell)
 # Platform: linux/arm64  Image: sco2-rl:latest
 # Stage 1 builds OMC + CoolProp + ExternalMedia from source.
@@ -9,7 +8,7 @@ ARG EXTERNAL_MEDIA_VERSION=4.0.0
 ARG PYTHON_DEPS="OMPython>=3.5 fmpy>=0.3.21 stable-baselines3>=2.3 gymnasium>=0.29 \
     scipy>=1.11 h5py>=3.10 tensorboard>=2.16 jinja2>=3.1 pydantic>=2.0 \
     pyyaml>=6.0 scikit-learn>=1.4 pytest>=8.0 pytest-cov ruff hatchling skrl>=1.4 \
-    physicsnemo"
+    nvidia-physicsnemo"
 
 # ─── Stage 1: Builder ────────────────────────────────────────────────────────
 FROM arm64v8/ubuntu:22.04 AS builder
@@ -83,12 +82,18 @@ RUN mkdir -p /build/CoolProp && \
 # ── ThermoPower & SCOPE Modelica libraries ────────────────────────────────────
 # Clone into /opt/libs/ for loadFile() in OMPython scripts
 RUN mkdir -p /opt/libs && \
-    git clone --depth 1 \
-        https://github.com/casella/ThermoPower.git \
-        /opt/libs/ThermoPower && \
-    git clone --depth 1 \
-        https://github.com/sxwd4ever/UQSTEPS_modelica.git \
-        /opt/libs/SCOPE
+    for i in 1 2 3 4 5; do \
+        git clone --depth 1 \
+            https://github.com/casella/ThermoPower.git \
+            /opt/libs/ThermoPower && break || \
+        (echo "ThermoPower clone attempt $i failed, retrying..."; sleep 10); \
+    done && \
+    for i in 1 2 3 4 5; do \
+        git clone --depth 1 \
+            https://github.com/sxwd4ever/UQSTEPS_modelica.git \
+            /opt/libs/SCOPE && break || \
+        (echo "SCOPE clone attempt $i failed, retrying..."; sleep 10); \
+    done
 
 # ── SCOPE Modelica 4.x compatibility patches (ARM64, OMC 1.26+) ─────────────
 # SCOPE was written for Modelica 3.2.1. Patch for Modelica 4.1.0 / OMC 1.26.2.

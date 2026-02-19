@@ -89,24 +89,46 @@ def _pid_config(env_config: dict) -> dict:
     ch2_obs = obs_vars[measurement_indices[action_vars[2]]]  # main_compressor.p_outlet (MPa)
     ch3_obs = obs_vars[measurement_indices[action_vars[3]]]  # precooler.T_outlet_rt (°C)
 
-    # Per-channel PID gains, physically motivated:
+    # Per-channel PID gains from Ziegler-Nichols step-response tuning.
+    # Raw ZN gains are derated by a factor of 0.4 (conservative) to avoid
+    # saturation and oscillation — ZN full gains are known to be aggressive.
+    # Gain units: normalized_action / physical_unit (°C or MPa).
     #
-    #   bypass_valve → turbine.T_inlet_rt (527–930 °C, ~400 °C range, slow thermal dynamics)
-    #     Large range → small kp to avoid saturation; mild integral; modest derivative.
-    #
-    #   igv → main_compressor.T_inlet_rt (31–43 °C, 12 °C range, moderate dynamics)
-    #     Tight range and safety-critical (critical point constraint) → higher kp.
-    #
-    #   inventory_valve → main_compressor.p_outlet (14–24 MPa, 10 MPa range)
-    #     Pressure dynamics are fast but action authority is limited → moderate gains.
-    #
-    #   cooling_flow → precooler.T_outlet_rt (31–43 °C, 12 °C range, fast cooling response)
-    #     Safety-critical (compressor inlet directly tracks this) → highest kp.
+    # Step-response summary (artifacts/pid_tuning/pid_gains.json):
+    #   bypass_valve  (→ turbine.T_inlet_rt):   K=666.7 °C/unit, L=5s, T=50s  → ZN kp=0.018
+    #   igv           (→ T_compressor_inlet):   K=10.58 °C/unit, L=5s, T=31.8s → ZN kp=0.72
+    #   inventory_val (→ p_compressor_outlet):  no_response → manual tuning retained
+    #   cooling_flow  (→ precooler.T_outlet):   K=15.26 °C/unit, L=5s, T=45.8s → ZN kp=0.72
+    _DETUNE = 0.4
     gains = {
-        action_vars[0]: {"kp": 0.0015, "ki": 0.00015, "kd": 0.0003, "derivative_filter_tau": 0.2},
-        action_vars[1]: {"kp": 0.06,   "ki": 0.006,   "kd": 0.012,  "derivative_filter_tau": 0.15},
-        action_vars[2]: {"kp": 0.04,   "ki": 0.004,   "kd": 0.008,  "derivative_filter_tau": 0.15},
-        action_vars[3]: {"kp": 0.08,   "ki": 0.008,   "kd": 0.016,  "derivative_filter_tau": 0.1},
+        # bypass_valve: ZN kp=0.018 → derated 0.007; ki/kd scaled proportionally
+        action_vars[0]: {
+            "kp": round(0.018 * _DETUNE, 5),
+            "ki": round(0.0018 * _DETUNE, 6),
+            "kd": round(0.045 * _DETUNE, 4),
+            "derivative_filter_tau": 0.15,
+        },
+        # igv: ZN kp=0.72 → derated 0.288; setpoint on compressor inlet (safety-critical)
+        action_vars[1]: {
+            "kp": round(0.72 * _DETUNE, 4),
+            "ki": round(0.072 * _DETUNE, 5),
+            "kd": round(0.50 * _DETUNE, 3),
+            "derivative_filter_tau": 0.15,
+        },
+        # inventory_valve: no ZN response → conservative manual gains
+        action_vars[2]: {
+            "kp": 0.04,
+            "ki": 0.004,
+            "kd": 0.008,
+            "derivative_filter_tau": 0.15,
+        },
+        # cooling_flow: ZN kp=0.72 → derated 0.288; fast thermal response
+        action_vars[3]: {
+            "kp": round(0.72 * _DETUNE, 4),
+            "ki": round(0.072 * _DETUNE, 5),
+            "kd": round(0.50 * _DETUNE, 3),
+            "derivative_filter_tau": 0.10,
+        },
     }
 
     # Setpoints use exact FMU obs variable names so _find_setpoint_key() exact-matches them.

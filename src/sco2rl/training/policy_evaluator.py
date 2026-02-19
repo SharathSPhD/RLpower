@@ -46,11 +46,14 @@ class PolicyEvaluator:
         self._T_var: str = config.get("T_comp_inlet_var", "T_compressor_inlet")
         self._deterministic: bool = bool(config.get("deterministic", True))
 
-        # Determine the index of T_comp_inlet in obs_vars (for fallback)
+        # Determine the index of T_comp_inlet in obs_vars (for fallback).
+        # Search by exact name OR by FMU variable name fragment.
         obs_vars = getattr(env, "_obs_vars", [])
-        self._T_idx: int | None = (
-            obs_vars.index(self._T_var) if self._T_var in obs_vars else None
-        )
+        self._T_idx: int | None = None
+        for i, v in enumerate(obs_vars):
+            if v == self._T_var or "T_inlet_rt" in v or "compressor" in v.lower():
+                self._T_idx = i
+                break
 
     def _get_T_comp(self, obs: np.ndarray, info: dict) -> float | None:
         """Extract T_compressor_inlet from step info or obs."""

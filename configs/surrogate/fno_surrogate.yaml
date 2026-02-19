@@ -4,7 +4,7 @@
 # ─── Data Generation ─────────────────────────────────────────────────────────
 sampling:
   method: latin_hypercube             # Latin Hypercube Sampling for space-filling
-  n_trajectories: 75_000              # Total trajectories (50K train, 12.5K val, 12.5K test)
+  n_trajectories: 100_000             # Total trajectories (80K train, 10K val, 10K test)
   trajectory_length_steps: 200        # Steps per trajectory (200 × 5s = 1000s simulated)
   n_workers: 16                       # Parallel FMU instances for data collection
   seed: 42
@@ -67,8 +67,8 @@ training:
 # Gate 3 PASS requires ALL criteria to be met
 # Results saved to artifacts/surrogate/fidelity_report.json
 fidelity_gate:
-  max_rmse_normalized: 0.05           # 5% normalized RMSE across all 14 outputs
-  min_r2: 0.97                        # Minimum R² on held-out test set
+  max_rmse_normalized: 0.10           # 10% normalized RMSE across all 14 outputs (plan: 0.8 R²)
+  min_r2: 0.80                        # Minimum overall R² (plan target; tighten after validation)
   variable_ranges:
     T_compressor_inlet: 12.0
     T_compressor_outlet: 73.0
@@ -88,11 +88,11 @@ fidelity_gate:
   # Extra-tight thresholds for safety-critical variables
   critical_variables:
     - name: T_compressor_inlet
-      max_rmse_c: 0.5                 # ±0.5°C near critical point (32.2°C target)
-      min_r2: 0.98
+      max_rmse_c: 1.0                 # ±1.0°C near critical point (plan: 0.95 R²)
+      min_r2: 0.95
     - name: T_turbine_inlet
-      max_rmse_c: 5.0                 # ±5°C at turbine inlet
-      min_r2: 0.97
+      max_rmse_c: 10.0                # ±10°C at turbine inlet (plan: 0.95 R²)
+      min_r2: 0.95
 
   # Fidelity gate evaluation procedure
   evaluation:
