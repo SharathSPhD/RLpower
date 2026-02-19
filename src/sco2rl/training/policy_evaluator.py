@@ -90,8 +90,16 @@ class PolicyEvaluator:
 
         env = self._env
 
-        for _ in range(self._n_episodes):
-            obs, info = env.reset()
+        for ep_idx in range(self._n_episodes):
+            # Deterministic per-episode seed ensures RL and PID face identical
+            # initial conditions when both are evaluated on the same environment.
+            episode_seed = ep_idx
+            obs, info = env.reset(seed=episode_seed)
+
+            # Reset stateful policies (e.g. PID integrator) between episodes.
+            if hasattr(model, "reset"):
+                model.reset()
+
             ep_reward = 0.0
             ep_steps = 0
             done = False

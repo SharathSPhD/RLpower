@@ -73,20 +73,60 @@ def _load_env_config(project_root: Path) -> dict:
 def _pid_config(env_config: dict) -> dict:
     obs_vars = env_config["obs_vars"]
     action_vars = env_config["action_vars"]
+
+    # Map each action channel to the obs variable it measures.
+    # Use exact FMU variable names so _find_setpoint_key() resolves them exactly.
     measurement_indices = {
         action_vars[0]: _find_obs_index(obs_vars, ["turbine.T_inlet_rt", "T_turbine_inlet"], 0),
         action_vars[1]: _find_obs_index(obs_vars, ["main_compressor.T_inlet_rt", "T_compressor_inlet"], 0),
         action_vars[2]: _find_obs_index(obs_vars, ["main_compressor.p_outlet", "P_high"], 0),
         action_vars[3]: _find_obs_index(obs_vars, ["precooler.T_outlet_rt", "T_precooler_outlet"], 0),
     }
-    gains = {name: {"kp": 0.02, "ki": 0.001} for name in action_vars}
+
+    # Resolve measured variable names for each channel (used to key setpoints).
+    ch0_obs = obs_vars[measurement_indices[action_vars[0]]]  # turbine.T_inlet_rt (°C)
+    ch1_obs = obs_vars[measurement_indices[action_vars[1]]]  # main_compressor.T_inlet_rt (°C)
+    ch2_obs = obs_vars[measurement_indices[action_vars[2]]]  # main_compressor.p_outlet (MPa)
+    ch3_obs = obs_vars[measurement_indices[action_vars[3]]]  # precooler.T_outlet_rt (°C)
+
+    # Per-channel PID gains, physically motivated:
+    #
+    #   bypass_valve → turbine.T_inlet_rt (527–930 °C, ~400 °C range, slow thermal dynamics)
+    #     Large range → small kp to avoid saturation; mild integral; modest derivative.
+    #
+    #   igv → main_compressor.T_inlet_rt (31–43 °C, 12 °C range, moderate dynamics)
+    #     Tight range and safety-critical (critical point constraint) → higher kp.
+    #
+    #   inventory_valve → main_compressor.p_outlet (14–24 MPa, 10 MPa range)
+    #     Pressure dynamics are fast but action authority is limited → moderate gains.
+    #
+    #   cooling_flow → precooler.T_outlet_rt (31–43 °C, 12 °C range, fast cooling response)
+    #     Safety-critical (compressor inlet directly tracks this) → highest kp.
+    gains = {
+        action_vars[0]: {"kp": 0.0015, "ki": 0.00015, "kd": 0.0003, "derivative_filter_tau": 0.2},
+        action_vars[1]: {"kp": 0.06,   "ki": 0.006,   "kd": 0.012,  "derivative_filter_tau": 0.15},
+        action_vars[2]: {"kp": 0.04,   "ki": 0.004,   "kd": 0.008,  "derivative_filter_tau": 0.15},
+        action_vars[3]: {"kp": 0.08,   "ki": 0.008,   "kd": 0.016,  "derivative_filter_tau": 0.1},
+    }
+
+    # Setpoints use exact FMU obs variable names so _find_setpoint_key() exact-matches them.
+    # Units must match what FMPyAdapter delivers after scale_offset conversion:
+    #   temperatures → °C  (FMU returns K; adapter applies −273.15)
+    #   pressures    → MPa (FMU returns Pa; adapter applies ×1e-6)
+    setpoints = {
+        ch0_obs: 550.0,   # turbine inlet target: design sCO₂ turbine inlet (°C)
+        ch1_obs: 33.0,    # compressor inlet target: 1.9 °C above CO₂ critical point
+        ch2_obs: 20.0,    # high-side pressure target: design operating point (MPa)
+        ch3_obs: 33.0,    # precooler outlet target: equals compressor inlet target
+    }
+
     return {
         "obs_vars": obs_vars,
         "action_vars": action_vars,
         "n_obs": len(obs_vars),
         "history_steps": env_config.get("history_steps", 1),
         "gains": gains,
-        "setpoints": {"W_net": 10.0, "T_compressor_inlet": 33.0},
+        "setpoints": setpoints,
         "measurement_indices": measurement_indices,
         "dt": env_config.get("step_size", 5.0),
     }
