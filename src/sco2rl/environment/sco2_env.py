@@ -108,12 +108,36 @@ class SCO2FMUEnv(gym.Env):
 
     # ── Gymnasium interface ────────────────────────────────────────────────────
 
+    # Mapping from options keys to FMU input variable name fragments.
+    # When options contains "T_exhaust_K" the code searches action_vars for a
+    # var whose name contains "T_init" (e.g. "regulator.T_init") and sets it.
+    _OPTIONS_TO_FMU: dict[str, str] = {
+        "T_exhaust_K":      "T_init",       # heat source temperature (K)
+        "mdot_exhaust_kgs": "m_flow_init",  # heat source mass flow (kg/s)
+    }
+
     def reset(
         self,
         *,
         seed: int | None = None,
         options: dict | None = None,
     ) -> tuple[np.ndarray, dict]:
+        """Reset the environment, optionally with LHS-sampled operating conditions.
+
+        Parameters
+        ----------
+        seed:
+            RNG seed forwarded to Gymnasium base class.
+        options:
+            Dict with any of:
+            - ``T_exhaust_K`` (float): heat source temperature in Kelvin.
+              Applied to the FMU action variable whose name contains "T_init"
+              (i.e. ``regulator.T_init``).
+            - ``mdot_exhaust_kgs`` (float): heat source mass flow in kg/s.
+              Applied to the FMU action variable whose name contains "m_flow_init".
+            - ``W_setpoint_MW`` (float): power demand setpoint in MW.
+              Overrides the ``W_net`` entry in ``self._setpoint`` for this episode.
+        """
         super().reset(seed=seed)
 
         self._fmu.reset()
@@ -129,6 +153,26 @@ class SCO2FMUEnv(gym.Env):
         self._previous_physical_action = self._act_phys_min.copy()
         self._episode_constraint_violations = 0
         self._setpoint = dict(self._base_setpoint)
+
+        # Apply LHS-sampled operating conditions before reading initial obs.
+        # This ensures the FMU starts from a diverse operating point for each
+        # trajectory rather than always at the default initial condition.
+        if options:
+            initial_inputs: dict[str, float] = {}
+            for opt_key, fmu_fragment in self._OPTIONS_TO_FMU.items():
+                if opt_key in options:
+                    # Find the matching action variable by name fragment
+                    matched = next(
+                        (v for v in self._action_vars if fmu_fragment in v),
+                        None,
+                    )
+                    if matched is not None:
+                        initial_inputs[matched] = float(options[opt_key])
+            if "W_setpoint_MW" in options:
+                self._setpoint["W_net"] = float(options["W_setpoint_MW"])
+            if initial_inputs:
+                self._fmu.set_inputs(initial_inputs)
+
         self._disturbance_profile = self._build_disturbance_profile()
 
         # Fill history buffer with the FMU's initial output
@@ -137,7 +181,11 @@ class SCO2FMUEnv(gym.Env):
             self._history[i] = raw_obs
 
         obs = self._build_obs()
-        info = {"step": 0, "time": 0.0}
+        info = {
+            "step": 0,
+            "time": 0.0,
+            "initial_inputs": initial_inputs if options else {},
+        }
         return obs, info
 
     def step(

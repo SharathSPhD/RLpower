@@ -52,12 +52,17 @@ class TrajectoryCollector:
         return obs[-self._raw_obs_dim :].astype(np.float32, copy=False)
 
     def collect_trajectory(self, sample: np.ndarray) -> dict:
-        """Run one episode with the given parameter sample.
+        """Run one episode with the given LHS-sampled parameter sample.
 
         Parameters
         ----------
         sample:
-            1-D array of shape (3,): [T_exhaust, mdot_exhaust, W_setpoint].
+            1-D array of shape (3,):
+            ``[T_exhaust_K, mdot_exhaust_kgs, W_setpoint_MW]``.
+            These are passed as ``options`` to ``env.reset()`` so the FMU is
+            actually configured with the sampled operating conditions before
+            the episode begins.  Previously the sample was only stored as
+            metadata while the FMU always reset to its default initial state.
 
         Returns
         -------
@@ -66,7 +71,12 @@ class TrajectoryCollector:
             - actions: np.ndarray of shape (trajectory_length - 1, n_act)
             - metadata: np.ndarray of shape (3,)
         """
-        obs, _ = self._env.reset()
+        options = {
+            "T_exhaust_K":      float(sample[0]),
+            "mdot_exhaust_kgs": float(sample[1]),
+            "W_setpoint_MW":    float(sample[2]),
+        }
+        obs, _ = self._env.reset(options=options)
 
         n_obs = self._raw_obs_dim
 
