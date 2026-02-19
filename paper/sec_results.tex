@@ -99,9 +99,58 @@ functions correctly even for scenarios the final policy has not practised:
 the constraint projection QP at inference time ensures safety invariants
 are maintained regardless of policy quality.
 
-\textbf{Remediation}: replay earlier phases periodically during Phase~6
-training, or use a prioritised experience replay curriculum that maintains
-a minimum visit frequency for all phases.
+\textbf{Remediation attempt — interleaved replay (3M supplementary steps).}
+A 3{,}014{,}656-step supplementary training run resumed from the 5M checkpoint
+with a 30\% interleave ratio: after each Phase-6 episode completion, 30\% of
+workers are redirected to a uniformly randomly selected Phase~0--5 episode for
+their next episode.
+The supplementary run completed with in-training mean reward 413.3 and zero
+violations, but the per-phase evaluation reveals severe regression:
+
+\begin{table}[h]
+\centering
+\caption{Per-phase comparison for all three policies (10 episodes each).
+         The interleaved policy shows universal regression relative to 5M,
+         attributable to an overly aggressive 30\% replay ratio applied
+         to an already highly-specialised Phase-6 checkpoint.}
+\label{tab:interleaved}
+\begin{tabular}{clrrrr}
+\toprule
+Phase & Scenario & PID & RL 5M & RL Interleaved & $\Delta$ vs 5M \\
+\midrule
+0 & Steady-state     & $114.3$ & $141.4$ & $-78.3$  & $-219.7$ \\
+1 & Gradual load     & $335.6$ & $416.2$ & $-76.9$  & $-493.1$ \\
+2 & Ambient disturb. & $664.2$ & $854.9$ & $-23.5$  & $-878.4$ \\
+3 & EAF transients   & $1161.7$& $773.3$ & $+72.6$  & $-700.7$ \\
+4 & Load rejection   & $402.5$ & $338.6$ & $-78.4$  & $-417.0$ \\
+5 & Cold startup     & $820.9$ & $284.6$ & $+142.6$ & $-142.0$ \\
+6 & Emergency trip   & $416.0$ & $255.4$ & $-89.2$  & $-344.6$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The interleaved policy underperforms both PID and the 5M baseline across
+all phases.
+\textbf{Diagnosis}: applying a 30\% replay ratio immediately to a policy that
+spent 95\% of its 5M steps in Phase~6 produced excessive plasticity:
+the network re-learned Phase-6 skills from a warm start while simultaneously
+receiving conflicting gradient signals from 30\% Phase~0--5 replay episodes,
+causing instability rather than knowledge retention.
+The in-training mean reward (413.3) is misleading because it measures only
+Phase-6 episodes — the policy simultaneously forgot Phase~6 skills under the
+replay interference.
+\textbf{Recommended remediation}: use a decay schedule for the replay ratio
+(start at $\leq$10\%, decay to 0\% over the first 500K steps) to allow
+the policy to first consolidate Phase-6 skills before introducing replay
+gradients.
+Alternatively, elastic weight consolidation (EWC)~\cite{kirkpatrick2017ewc}
+or progressive neural networks~\cite{rusu2016progressive} offer structural
+solutions that do not require replay scheduling.
+
+Despite the regression, the Lagrangian constraint mechanism maintains
+\textbf{zero safety violations} across all 70 interleaved-policy evaluation
+episodes, demonstrating that safety enforcement is robust even as reward
+performance degrades.
 
 \subsection{Surrogate Fidelity}
 

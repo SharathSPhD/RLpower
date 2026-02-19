@@ -1,0 +1,72 @@
+{
+  "rl_mean_reward": -78.27868314958312,
+  "pid_mean_reward": 114.31955201403989,
+  "reward_improvement_pct": -168.47357409018255,
+  "rl_violation_rate": 0.0,
+  "pid_violation_rate": 0.0,
+  "per_phase": [
+    {
+      "phase": 0,
+      "episode_length_steps": 120,
+      "rl_mean_reward": -78.27868314958312,
+      "pid_mean_reward": 114.31955201403989,
+      "reward_improvement_pct": -168.47357409018255,
+      "rl_violation_rate": 0.0,
+      "pid_violation_rate": 0.0
+    },
+    {
+      "phase": 1,
+      "episode_length_steps": 360,
+      "rl_mean_reward": -76.88532404819283,
+      "pid_mean_reward": 324.9436482761213,
+      "reward_improvement_pct": -123.66112538430751,
+      "rl_violation_rate": 0.0,
+      "pid_violation_rate": 0.0
+    },
+    {
+      "phase": 2,
+      "episode_length_steps": 720,
+      "rl_mean_reward": -23.542391379415147,
+      "pid_mean_reward": 664.5492112173116,
+      "reward_improvement_pct": -103.54261068721382,
+      "rl_violation_rate": 0.0,
+      "pid_violation_rate": 0.0
+    },
+    {
+      "phase": 3,
+      "episode_length_steps": 1080,
+      "rl_mean_reward": 72.62043235077618,
+      "pid_mean_reward": 1160.960837433589,
+      "reward_improvement_pct": -93.7447991344611,
+      "rl_violation_rate": 0.0,
+      "pid_violation_rate": 0.0
+    },
+    {
+      "phase": 4,
+      "episode_length_steps": 360,
+      "rl_mean_reward": -78.43280535892663,
+      "pid_mean_reward": 408.34398332058237,
+      "reward_improvement_pct": -119.20753300193934,
+      "rl_violation_rate": 0.0,
+      "pid_violation_rate": 0.0
+    },
+    {
+      "phase": 5,
+      "episode_length_steps": 720,
+      "rl_mean_reward": 142.5852687002211,
+      "pid_mean_reward": 822.7188899697956,
+      "reward_improvement_pct": -82.66901727438365,
+      "rl_violation_rate": 0.0,
+      "pid_violation_rate": 0.0
+    },
+    {
+      "phase": 6,
+      "episode_length_steps": 360,
+      "rl_mean_reward": -89.17934354099262,
+      "pid_mean_reward": 418.52002906773635,
+      "reward_improvement_pct": -121.30826181447725,
+      "rl_violation_rate": 0.0,
+      "pid_violation_rate": 0.0
+    }
+  ]
+}
