@@ -85,6 +85,17 @@ def parse_args():
         help="Train FNO only; skip SKRL PPO step",
     )
     p.add_argument(
+        "--allow-fidelity-fail",
+        action="store_true",
+        help="Continue to SKRL PPO even if fidelity gate fails (for smoke/debug runs)",
+    )
+    p.add_argument(
+        "--rl-timesteps",
+        type=int,
+        default=None,
+        help="Override SKRL PPO total_timesteps from config",
+    )
+    p.add_argument(
         "--verbose",
         type=int,
         default=1,
@@ -116,6 +127,7 @@ def build_env_config(env_cfg: dict) -> dict:
     # Raw obs_vars (without stacking) — SurrogateEnv handles history internally
     fmu_obs_vars = [v for v in obs_vars_raw if v.get("fmu_var") is not None]
     obs_vars = [v["fmu_var"] for v in fmu_obs_vars]
+    obs_names = [v.get("name", v["fmu_var"]) for v in fmu_obs_vars]
     obs_bounds = {v["fmu_var"]: (v["min"], v["max"]) for v in fmu_obs_vars}
 
     act_section = env_cfg["action"]
@@ -123,9 +135,9 @@ def build_env_config(env_cfg: dict) -> dict:
     action_vars = [v["fmu_var"] for v in act_vars_raw]
     action_config = {
         v["fmu_var"]: {
-            "min": v["physical_min"],
-            "max": v["physical_max"],
-            "rate": v.get("rate_limit_per_step", v.get("rate_limit", v.get("rate", 1.0))),
+            "phys_min": v["physical_min"],
+            "phys_max": v["physical_max"],
+            "rate_limit": v.get("rate_limit_per_step", v.get("rate_limit", v.get("rate", 1.0))),
         }
         for v in act_vars_raw
     }
@@ -133,6 +145,7 @@ def build_env_config(env_cfg: dict) -> dict:
     episode = env_cfg.get("episode", {})
     return {
         "obs_vars": obs_vars,
+        "obs_names": obs_names,
         "obs_bounds": obs_bounds,
         "action_vars": action_vars,
         "action_config": action_config,
@@ -210,6 +223,64 @@ def make_splits(
     ds = TensorDataset(x, y)
     generator = torch.Generator().manual_seed(seed)
     return random_split(ds, [n_train, n_val, n_test], generator=generator)
+
+
+def _subset_tensors(dataset: TensorDataset) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return x/y tensors for a TensorDataset or Subset[TensorDataset]."""
+    if hasattr(dataset, "dataset") and hasattr(dataset, "indices"):
+        base = dataset.dataset
+        idx = torch.as_tensor(dataset.indices, dtype=torch.long)
+        x_all, y_all = base.tensors
+        return x_all[idx], y_all[idx]
+    return dataset.tensors
+
+
+def compute_normalization_stats(train_ds: TensorDataset) -> dict[str, torch.Tensor]:
+    """Compute channel-wise z-score stats on training split only."""
+    x_train, y_train = _subset_tensors(train_ds)
+    x_mean = x_train.mean(dim=(0, 2), keepdim=True)
+    x_std = x_train.std(dim=(0, 2), keepdim=True).clamp_min(1e-6)
+    y_mean = y_train.mean(dim=(0, 2), keepdim=True)
+    y_std = y_train.std(dim=(0, 2), keepdim=True).clamp_min(1e-6)
+    return {"x_mean": x_mean, "x_std": x_std, "y_mean": y_mean, "y_std": y_std}
+
+
+def apply_normalization(
+    dataset: TensorDataset,
+    stats: dict[str, torch.Tensor],
+) -> TensorDataset:
+    """Apply z-score normalization to x/y channels."""
+    x_raw, y_raw = _subset_tensors(dataset)
+    x_norm = (x_raw - stats["x_mean"]) / stats["x_std"]
+    y_norm = (y_raw - stats["y_mean"]) / stats["y_std"]
+    return TensorDataset(x_norm, y_norm)
+
+
+def save_normalization_stats(path: str, stats: dict[str, torch.Tensor]) -> str:
+    """Persist normalization tensors as numpy arrays."""
+    out_path = str(Path(path).with_name("best_fno_norm.npz"))
+    np.savez(
+        out_path,
+        x_mean=stats["x_mean"].cpu().numpy(),
+        x_std=stats["x_std"].cpu().numpy(),
+        y_mean=stats["y_mean"].cpu().numpy(),
+        y_std=stats["y_std"].cpu().numpy(),
+    )
+    return out_path
+
+
+def load_normalization_stats(path: str) -> dict[str, torch.Tensor] | None:
+    """Load normalization stats if present next to model weights."""
+    norm_path = Path(path).with_name("best_fno_norm.npz")
+    if not norm_path.exists():
+        return None
+    data = np.load(norm_path)
+    return {
+        "x_mean": torch.from_numpy(data["x_mean"]).float(),
+        "x_std": torch.from_numpy(data["x_std"]).float(),
+        "y_mean": torch.from_numpy(data["y_mean"]).float(),
+        "y_std": torch.from_numpy(data["y_std"]).float(),
+    }
 
 
 def val_loss(model: nn.Module, dataset: TensorDataset, device: str, batch_size: int = 512) -> float:
@@ -303,8 +374,9 @@ def run_fidelity_gate(
     model: nn.Module,
     test_ds: TensorDataset,
     gate_cfg: dict,
-    obs_dim: int,
+    variable_names: list[str],
     device: str,
+    norm_stats: dict[str, torch.Tensor] | None = None,
 ) -> bool:
     """Evaluate fidelity gate on test split.
 
@@ -317,28 +389,45 @@ def run_fidelity_gate(
 
     model.eval()
 
+    y_mean = y_std = None
+    if norm_stats is not None:
+        y_mean = norm_stats["y_mean"].to(device)
+        y_std = norm_stats["y_std"].to(device)
+
     # Collect predictions and targets from test set
     preds_list, targets_list = [], []
     with torch.no_grad():
         for xb, yb in DataLoader(test_ds, batch_size=256, shuffle=False):
             xb = xb.to(device)
             pred = model(xb)  # (B, obs_dim, T)
+            if y_mean is not None and y_std is not None:
+                pred = pred * y_std + y_mean
+                yb = yb.to(device) * y_std + y_mean
+            else:
+                yb = yb.to(device)
             # Permute to (B, T, obs_dim) for FidelityGate
             preds_list.append(pred.cpu().permute(0, 2, 1).numpy())
-            targets_list.append(yb.permute(0, 2, 1).numpy())
+            targets_list.append(yb.cpu().permute(0, 2, 1).numpy())
 
     predictions = np.concatenate(preds_list, axis=0)  # (N, T, obs_dim)
     targets = np.concatenate(targets_list, axis=0)    # (N, T, obs_dim)
 
-    # Build simple variable names based on obs_dim
-    variable_names = [f"obs_{i}" for i in range(obs_dim)]
+    if predictions.shape[-1] != len(variable_names):
+        variable_names = [f"obs_{i}" for i in range(predictions.shape[-1])]
 
-    # FidelityGate config: variable_ranges defaults to empty (gate uses raw values)
+    # Populate variable ranges from env bounds when omitted.
+    ranges_cfg = dict(gate_cfg.get("variable_ranges", {}))
+    if not ranges_cfg:
+        ranges_cfg = {
+            name: 1.0
+            for name in variable_names
+        }
+
     gate_config = {
         "max_rmse_normalized": gate_cfg.get("max_rmse_normalized", 0.05),
         "min_r2": gate_cfg.get("min_r2", 0.97),
         "critical_variables": gate_cfg.get("critical_variables", []),
-        "variable_ranges": gate_cfg.get("variable_ranges", {}),
+        "variable_ranges": ranges_cfg,
     }
 
     gate = FidelityGate(config=gate_config)
@@ -407,31 +496,47 @@ def main():
     logger.info("FNO dims: input_dim=%d, output_dim=%d (from data)", input_dim, output_dim)
 
     # 80/10/10 split
-    train_ds, val_ds, test_ds = make_splits(
+    train_ds_raw, val_ds_raw, test_ds_raw = make_splits(
         x, y,
         val_frac=float(train_cfg.get("validation_split", 0.10)),
         test_frac=float(train_cfg.get("test_split", 0.10)),
         seed=int(train_cfg.get("seed", 42)),
     )
     logger.info(
-        "Splits: train=%d, val=%d, test=%d", len(train_ds), len(val_ds), len(test_ds)
+        "Splits: train=%d, val=%d, test=%d",
+        len(train_ds_raw),
+        len(val_ds_raw),
+        len(test_ds_raw),
     )
 
-    # ── Build FNO1d ──────────────────────────────────────────────────────────
-    from sco2rl.surrogate.fno_model import FNO1d
+    normalize_cfg = train_cfg.get("loss", {})
+    use_normalization = bool(normalize_cfg.get("normalize_per_variable", True))
+    norm_stats: dict[str, torch.Tensor] | None = None
+    if use_normalization:
+        norm_stats = compute_normalization_stats(train_ds_raw)
+        train_ds = apply_normalization(train_ds_raw, norm_stats)
+        val_ds = apply_normalization(val_ds_raw, norm_stats)
+        test_ds = apply_normalization(test_ds_raw, norm_stats)
+        del x, y, train_ds_raw, val_ds_raw, test_ds_raw
+        logger.info("Enabled per-variable z-score normalization for FNO training.")
+    else:
+        train_ds, val_ds, test_ds = train_ds_raw, val_ds_raw, test_ds_raw
 
-    model = FNO1d(
-        modes=int(fno_arch_cfg.get("modes", 16)),
-        width=int(fno_arch_cfg.get("width", 64)),
-        n_layers=int(fno_arch_cfg.get("n_layers", 4)),
-        input_dim=input_dim,   # from actual data
-        output_dim=output_dim, # from actual data
-        activation=fno_arch_cfg.get("activation", "gelu"),
-        padding=int(fno_arch_cfg.get("padding", 8)),
-    ).to(device)
+    # ── Build SCO2SurrogateFNO (PhysicsNeMo-backed) ────────────────────────
+    from sco2rl.surrogate.fno_model import SCO2SurrogateFNO
+
+    fno_config = {
+        "input_dim":  input_dim,    # from actual data (obs_dim + act_dim)
+        "output_dim": output_dim,   # from actual data (obs_dim)
+        "modes":    int(fno_arch_cfg.get("modes",   16)),
+        "width":    int(fno_arch_cfg.get("width",   64)),
+        "n_layers": int(fno_arch_cfg.get("n_layers", 4)),
+        "padding":  int(fno_arch_cfg.get("padding",  8)),
+    }
+    model = SCO2SurrogateFNO(config=fno_config).to(device)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info("FNO1d parameters: %s", f"{n_params:,}")
+    logger.info("SCO2SurrogateFNO (PhysicsNeMo FNO) parameters: %s", f"{n_params:,}")
 
     # ── FNO training (or load pre-trained weights) ────────────────────────────
     if args.fno_checkpoint:
@@ -441,6 +546,13 @@ def main():
         logger.info("Loading pre-trained FNO weights from %s", fno_ckpt_in)
         state = torch.load(fno_ckpt_in, map_location=device)
         model.load_state_dict(state)
+        if use_normalization:
+            norm_stats = load_normalization_stats(fno_ckpt_in)
+            if norm_stats is None:
+                logger.warning(
+                    "Normalization stats file not found next to checkpoint. "
+                    "Fidelity gate will use unnormalized outputs."
+                )
     else:
         logger.info("Starting FNO supervised training ...")
         train_fno(
@@ -455,17 +567,43 @@ def main():
         # Reload best weights
         logger.info("Reloading best FNO weights from %s", fno_ckpt_out)
         model.load_state_dict(torch.load(fno_ckpt_out, map_location=device))
+        if use_normalization and norm_stats is not None:
+            norm_path = save_normalization_stats(fno_ckpt_out, norm_stats)
+            logger.info("Saved normalization stats to %s", norm_path)
 
     # ── Fidelity gate ─────────────────────────────────────────────────────────
     logger.info("Running fidelity gate on test split ...")
-    gate_passed = run_fidelity_gate(model, test_ds, gate_cfg, obs_dim, device)
+    obs_variables = [
+        v for v in env_cfg["observation"]["variables"] if v.get("fmu_var") is not None
+    ]
+    variable_names = [v.get("name", v["fmu_var"]) for v in obs_variables]
+    variable_ranges = {
+        v.get("name", v["fmu_var"]): max(float(v["max"]) - float(v["min"]), 1e-6)
+        for v in obs_variables
+    }
+    gate_cfg = dict(gate_cfg)
+    if not gate_cfg.get("variable_ranges"):
+        gate_cfg["variable_ranges"] = variable_ranges
+    gate_passed = run_fidelity_gate(
+        model=model,
+        test_ds=test_ds,
+        gate_cfg=gate_cfg,
+        variable_names=variable_names,
+        device=device,
+        norm_stats=norm_stats if use_normalization else None,
+    )
 
-    if not gate_passed:
+    if not gate_passed and not args.allow_fidelity_fail:
         logger.error(
             "Fidelity gate FAILED. "
             "Collect more data or tune FNO hyperparameters before launching SKRL PPO."
         )
         sys.exit(1)
+    if not gate_passed and args.allow_fidelity_fail:
+        logger.warning(
+            "Fidelity gate failed but --allow-fidelity-fail is enabled; "
+            "continuing to SKRL PPO for fail-fast orchestration validation."
+        )
 
     if args.skip_rl:
         logger.info("--skip-rl: FNO training complete. Exiting before SKRL PPO.")
@@ -476,20 +614,29 @@ def main():
 
     # Inject env config (obs/action vars) into skrl config
     env_config = build_env_config(env_cfg)
+    if use_normalization and norm_stats is not None:
+        env_config["normalization"] = {
+            "obs_mean": norm_stats["x_mean"][0, :obs_dim, 0].cpu().numpy().tolist(),
+            "obs_std": norm_stats["x_std"][0, :obs_dim, 0].cpu().numpy().tolist(),
+            "act_mean": norm_stats["x_mean"][0, obs_dim:, 0].cpu().numpy().tolist(),
+            "act_std": norm_stats["x_std"][0, obs_dim:, 0].cpu().numpy().tolist(),
+            "next_obs_mean": norm_stats["y_mean"][0, :, 0].cpu().numpy().tolist(),
+            "next_obs_std": norm_stats["y_std"][0, :, 0].cpu().numpy().tolist(),
+        }
     skrl_cfg["env_config"] = env_config
 
-    from sco2rl.surrogate.surrogate_env import SurrogateEnv
     from sco2rl.surrogate.surrogate_trainer import SurrogateTrainer
 
     surrogate_trainer = SurrogateTrainer(
         surrogate_model=model,
         config=skrl_cfg,
-        env_class=SurrogateEnv,
         device=device,
     )
     surrogate_trainer.build_envs()
     surrogate_trainer.build_agent()
 
+    if args.rl_timesteps is not None:
+        skrl_cfg["total_timesteps"] = int(args.rl_timesteps)
     total_timesteps = int(skrl_cfg.get("total_timesteps", 5_000_000))
     logger.info("Training SKRL PPO: timesteps=%d ...", total_timesteps)
     stats = surrogate_trainer.train(timesteps=total_timesteps)

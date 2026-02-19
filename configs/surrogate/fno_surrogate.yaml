@@ -45,7 +45,7 @@ fno:
 
 # ─── Training ────────────────────────────────────────────────────────────────
 training:
-  framework: physicsnemo
+  framework: physicsnemo        # Uses physicsnemo.models.fno.FNO (not custom)
   optimizer: adam
   lr: 1.0e-3
   lr_schedule: cosine_annealing

@@ -8,7 +8,8 @@ ARG COOLPROP_VERSION=6.6.0
 ARG EXTERNAL_MEDIA_VERSION=4.0.0
 ARG PYTHON_DEPS="OMPython>=3.5 fmpy>=0.3.21 stable-baselines3>=2.3 gymnasium>=0.29 \
     scipy>=1.11 h5py>=3.10 tensorboard>=2.16 jinja2>=3.1 pydantic>=2.0 \
-    pyyaml>=6.0 scikit-learn>=1.4 pytest>=8.0 pytest-cov ruff hatchling skrl>=1.4"
+    pyyaml>=6.0 scikit-learn>=1.4 pytest>=8.0 pytest-cov ruff hatchling skrl>=1.4 \
+    physicsnemo"
 
 # ─── Stage 1: Builder ────────────────────────────────────────────────────────
 FROM arm64v8/ubuntu:22.04 AS builder

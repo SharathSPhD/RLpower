@@ -1,188 +1,272 @@
-"""FNO1d surrogate model implementation.
+"""SCO2SurrogateFNO -- PhysicsNeMo (NVIDIA Modulus) FNO surrogate model.
 
-Implements 1D Fourier Neural Operator for time-series state prediction.
-Architecture: SpectralConv1d -> FNOBlock -> FNO1d (full network).
-Reference: Li et al., "Fourier Neural Operator for Parametric PDEs" (2021).
+Wraps the PhysicsNeMo FNO class with the predict_next_state(state, action)
+interface required by SurrogateTrainer.
+
+Architecture
+------------
+  Input  : (B, input_dim, T)   -- state-action sequence (T=1 for one-step prediction)
+  FNO    : PhysicsNeMo FNO1d   -- Fourier spectral convolutions on the time axis
+  Output : (B, output_dim, T)  -- predicted next states
+
+For autoregressive one-step prediction:
+  T=1, input_dim = n_state + n_action, output_dim = n_state
 """
-
 from __future__ import annotations
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import importlib
+import warnings
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
+    import torch.nn as nn
 
 
-class SpectralConv1d(nn.Module):
-    """Complex multiplication in Fourier space -- core FNO building block.
+def _get_torch():
+    import torch
+    return torch
 
-    Performs the Fourier layer operation:
-    1. FFT the input along the time axis
-    2. Multiply the lowest `modes` Fourier coefficients by learnable complex weights
-    3. Inverse FFT back to physical space
+
+def _get_nn():
+    import torch.nn as nn
+    return nn
+
+
+def _import_physicsnemo_fno():
+    """Try to import the PhysicsNeMo FNO class.
+
+    PhysicsNeMo has gone through several package renames:
+      - nvidia-modulus < 0.9  -> modulus.models.fno.fno.FNO
+      - physicsnemo >= 0.1    -> physicsnemo.models.fno.FNO
+      - modulus alias maintained for backward compatibility in some builds
+
+    Returns the FNO class or raises ImportError with diagnostic message.
+    """
+    candidates = [
+        ("physicsnemo.models.fno", "FNO"),
+        ("modulus.models.fno.fno", "FNO"),
+        ("modulus.models.fno", "FNO"),
+    ]
+    for module_path, class_name in candidates:
+        try:
+            mod = importlib.import_module(module_path)
+            cls = getattr(mod, class_name)
+            return cls
+        except (ImportError, AttributeError):
+            continue
+
+    tried = ", ".join("{}.{}".format(m, c) for m, c in candidates)
+    raise ImportError(
+        "PhysicsNeMo FNO not found. Install with:\n"
+        "  pip install physicsnemo\n"
+        "or inside the Docker image:\n"
+        "  pip install --no-cache-dir physicsnemo\n\n"
+        "Tried: " + tried
+    )
+
+
+class SCO2SurrogateFNO:
+    """PhysicsNeMo FNO surrogate for sCO2 state prediction.
+
+    Parameters
+    ----------
+    config:
+        Dict with keys matching fno_surrogate.yaml:
+        - input_dim (int): state_dim + action_dim (e.g. 14 + 4 = 18)
+        - output_dim (int): number of state variables predicted (e.g. 14)
+        - modes (int): Fourier modes retained (default 16)
+        - width or latent_channels (int): spectral latent dimension (default 64)
+        - n_layers (int): number of FNO spectral layers (default 4)
+        - padding (int): spectral padding (default 8)
     """
 
-    def __init__(self, in_channels: int, out_channels: int, modes: int) -> None:
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.modes = modes
+    def __init__(self, config: dict) -> None:
+        torch = _get_torch()
+        nn = _get_nn()
+        # Call nn.Module.__init__ through the superclass mechanism
+        # (we inherit dynamically to avoid top-level torch import)
+        _ModuleBase = nn.Module
+        _ModuleBase.__init__(self)
 
-        # Complex weights stored as real tensor of shape (in_c, out_c, modes, 2)
-        # using torch.view_as_complex / view_as_real for compatibility
-        scale = 1.0 / (in_channels * out_channels)
-        self.weights = nn.Parameter(
-            scale * torch.randn(in_channels, out_channels, modes, dtype=torch.cfloat)
+        ModulusFNO = _import_physicsnemo_fno()
+
+        in_ch = int(config["input_dim"])
+        out_ch = int(config["output_dim"])
+        latent = int(config.get("width", config.get("latent_channels", 64)))
+        modes = int(config.get("modes", 16))
+        n_layers = int(config.get("n_layers", 4))
+        padding = int(config.get("padding", 8))
+
+        self.fno = ModulusFNO(
+            in_channels=in_ch,
+            out_channels=out_ch,
+            dimension=1,
+            latent_channels=latent,
+            num_fno_layers=n_layers,
+            num_fno_modes=modes,
+            padding=padding,
+            activation_fn="gelu",
+            coord_features=False,
         )
 
-    def _compl_mul1d(self, x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
-        """Batched complex matmul: (B, in_c, modes) x (in_c, out_c, modes) -> (B, out_c, modes)."""
-        return torch.einsum("bim,iom->bom", x, w)
+        self._input_dim = in_ch
+        self._output_dim = out_ch
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """(B, C_in, T) -> (B, C_out, T)."""
-        T = x.shape[-1]
-
-        # FFT along time axis
-        x_ft = torch.fft.rfft(x, dim=-1)  # (B, C_in, T//2 + 1)
-
-        # Retain only `modes` lowest frequencies
-        modes = min(self.modes, x_ft.shape[-1])
-        out_ft = torch.zeros(
-            x.shape[0], self.out_channels, x_ft.shape[-1],
-            dtype=torch.cfloat, device=x.device,
-        )
-        out_ft[:, :, :modes] = self._compl_mul1d(x_ft[:, :, :modes], self.weights[:, :, :modes])
-
-        # Inverse FFT
-        return torch.fft.irfft(out_ft, n=T, dim=-1)  # (B, C_out, T)
-
-
-class FNOBlock(nn.Module):
-    """One FNO layer: spectral conv + bypass pointwise conv + GELU activation."""
-
-    def __init__(self, width: int, modes: int, activation: str = "gelu") -> None:
-        super().__init__()
-        self.spectral = SpectralConv1d(width, width, modes)
-        self.bypass = nn.Conv1d(width, width, kernel_size=1)
-
-        if activation == "gelu":
-            self.act = nn.GELU()
-        elif activation == "relu":
-            self.act = nn.ReLU()
-        elif activation == "tanh":
-            self.act = nn.Tanh()
-        else:
-            raise ValueError(f"Unknown activation: {activation}")
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """(B, width, T) -> (B, width, T)."""
-        return self.act(self.spectral(x) + self.bypass(x))
-
-
-class FNO1d(nn.Module):
-    """Full FNO1d network for 1D time-series surrogate modeling.
-
-    Maps (batch, input_dim, T) -> (batch, output_dim, T).
-
-    Architecture:
-      input_projection: input_dim -> width (linear, no activation)
-      n_layers x FNOBlock(width, modes)
-      output_projection: width -> output_dim (2-layer MLP)
-
-    Used autoregressively via predict_next_state() for one-step simulation.
-    """
-
-    def __init__(
-        self,
-        modes: int,
-        width: int,
-        n_layers: int,
-        input_dim: int,
-        output_dim: int,
-        activation: str = "gelu",
-        padding: int = 8,
-    ) -> None:
-        super().__init__()
-        self.modes = modes
-        self.width = width
-        self.n_layers = n_layers
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.padding = padding
-
-        # Input projection: pointwise conv (equivalent to linear per time-step)
-        self.input_proj = nn.Conv1d(input_dim, width, kernel_size=1)
-
-        # FNO blocks
-        self.blocks = nn.ModuleList(
-            [FNOBlock(width, modes, activation) for _ in range(n_layers)]
-        )
-
-        # Output projection: width -> width//2 -> output_dim
-        self.output_proj = nn.Sequential(
-            nn.Conv1d(width, width // 2, kernel_size=1),
-            nn.GELU(),
-            nn.Conv1d(width // 2, output_dim, kernel_size=1),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         """Forward pass.
 
         Parameters
         ----------
-        x : torch.Tensor
+        x:
             Shape (B, input_dim, T).
 
         Returns
         -------
-        torch.Tensor
-            Shape (B, output_dim, T).
+        Tensor, shape (B, output_dim, T).
         """
-        # Project input channels to latent width
-        x = self.input_proj(x)  # (B, width, T)
+        return self.fno(x)
 
-        # Pad to avoid aliasing at boundaries
-        if self.padding > 0:
-            x = F.pad(x, [0, self.padding])
-
-        # FNO blocks
-        for block in self.blocks:
-            x = block(x)
-
-        # Remove padding
-        if self.padding > 0:
-            x = x[..., : -self.padding]
-
-        # Project to output
-        return self.output_proj(x)  # (B, output_dim, T)
-
-    def predict_next_state(
-        self,
-        state: torch.Tensor,
-        action: torch.Tensor,
-    ) -> torch.Tensor:
-        """Autoregressive one-step prediction.
+    def predict_next_state(self, state, action):
+        """Autoregressive one-step state prediction.
 
         Parameters
         ----------
-        state : torch.Tensor
-            Shape (B, n_obs) -- current normalized observation.
-        action : torch.Tensor
-            Shape (B, n_act) -- current action in physical / normalized space.
+        state:
+            Shape (B, n_state) -- current normalized observation.
+        action:
+            Shape (B, n_action) -- current action.
 
         Returns
         -------
-        torch.Tensor
-            Shape (B, n_obs) -- predicted next state.
+        Tensor, shape (B, n_state) -- predicted next state.
         """
-        # Concatenate state and action along feature axis -> (B, input_dim)
-        x = torch.cat([state, action], dim=-1)  # (B, input_dim)
-
-        # Add time dimension T=1 -> (B, input_dim, 1)
-        x = x.unsqueeze(-1)
-
-        # Forward pass -> (B, output_dim, 1)
-        out = self.forward(x)
-
-        # Remove time dimension -> (B, output_dim)
+        torch = _get_torch()
+        x = torch.cat([state, action], dim=-1).unsqueeze(-1)
+        out = self.fno(x)
         return out.squeeze(-1)
+
+    # Make SCO2SurrogateFNO behave as nn.Module at runtime (duck-typing via __init_subclass__)
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+    def to(self, *args, **kwargs):
+        self.fno = self.fno.to(*args, **kwargs)
+        return self
+
+    def train(self, mode=True):
+        self.fno.train(mode)
+        return self
+
+    def eval(self):
+        self.fno.eval()
+        return self
+
+    def parameters(self):
+        return self.fno.parameters()
+
+    def state_dict(self, *args, **kwargs):
+        return self.fno.state_dict(*args, **kwargs)
+
+    def load_state_dict(self, state_dict, strict=True, **kwargs):
+        return self.fno.load_state_dict(state_dict, strict=strict, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+
+def _make_surrogate_fno(config: dict):
+    """Factory that returns a proper nn.Module subclass wrapping PhysicsNeMo FNO."""
+    import torch.nn as nn
+    ModulusFNO = _import_physicsnemo_fno()
+
+    in_ch = int(config["input_dim"])
+    out_ch = int(config["output_dim"])
+    latent = int(config.get("width", config.get("latent_channels", 64)))
+    modes = int(config.get("modes", 16))
+    n_layers = int(config.get("n_layers", 4))
+    padding = int(config.get("padding", 8))
+
+    class _Wrapper(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fno = ModulusFNO(
+                in_channels=in_ch,
+                out_channels=out_ch,
+                dimension=1,
+                latent_channels=latent,
+                num_fno_layers=n_layers,
+                num_fno_modes=modes,
+                padding=padding,
+                activation_fn="gelu",
+                coord_features=False,
+            )
+            self._input_dim = in_ch
+            self._output_dim = out_ch
+
+        def forward(self, x):
+            return self.fno(x)
+
+        def predict_next_state(self, state, action):
+            import torch
+            x = torch.cat([state, action], dim=-1).unsqueeze(-1)
+            return self.fno(x).squeeze(-1)
+
+    return _Wrapper()
+
+
+# Override SCO2SurrogateFNO with a proper nn.Module factory
+_OrigSCO2SurrogateFNO = SCO2SurrogateFNO
+
+
+class SCO2SurrogateFNO:  # noqa: F811 - intentional redefinition
+    """PhysicsNeMo FNO surrogate for sCO2 state prediction (nn.Module subclass).
+
+    Parameters
+    ----------
+    config:
+        Dict with keys matching fno_surrogate.yaml:
+        - input_dim, output_dim, modes, width or latent_channels, n_layers, padding
+    """
+
+    def __new__(cls, config: dict):
+        return _make_surrogate_fno(config)
+
+
+class _LegacyFNOAlias:
+    """Backward-compatible alias: FNO1d redirects to SCO2SurrogateFNO."""
+
+    def __new__(cls, modes=16, width=64, n_layers=4,
+                input_dim=18, output_dim=14, activation="gelu", padding=8):
+        warnings.warn(
+            "FNO1d is deprecated. Use SCO2SurrogateFNO instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return SCO2SurrogateFNO(config={
+            "input_dim": input_dim,
+            "output_dim": output_dim,
+            "modes": modes,
+            "width": width,
+            "n_layers": n_layers,
+            "padding": padding,
+        })
+
+
+FNO1d = _LegacyFNOAlias
+
+
+class _RemovedClass:
+    def __init__(self, *args, **kwargs):
+        raise ImportError(
+            self.__class__.__name__ + " has been removed. "
+            "Use SCO2SurrogateFNO (physicsnemo-backed) instead."
+        )
+
+
+class FNOBlock(_RemovedClass):
+    pass
+
+
+class SpectralConv1d(_RemovedClass):
+    pass

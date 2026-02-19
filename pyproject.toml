@@ -39,7 +39,7 @@ rl-fmu = [
 # Surrogate training - GPU path (Stage 3)
 surrogate = [
     "h5py>=3.10",
-    "nvidia-modulus>=0.6",   # PhysicsNeMo
+    "physicsnemo>=0.1",      # PhysicsNeMo (formerly nvidia-modulus)
     "skrl>=1.2",
     "torch>=2.2",
 ]
