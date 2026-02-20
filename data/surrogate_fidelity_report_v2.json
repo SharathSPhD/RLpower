@@ -1,0 +1,28 @@
+{
+  "version": "v2",
+  "dataset": "lhs_76600_unique",
+  "n_trajectories": 76600,
+  "overall_rmse_normalized": 0.0010,
+  "overall_r2": 1.0000,
+  "best_val_loss": 0.000037,
+  "training_epochs": 200,
+  "fno_parameters": 546190,
+  "library": "nvidia-physicsnemo",
+  "passed": true,
+  "fidelity_gate_thresholds": {
+    "max_rmse_normalized": 0.10,
+    "min_r2": 0.80
+  },
+  "test_split_size": 7660,
+  "hardware": "NVIDIA DGX Spark GB10 Grace Blackwell",
+  "training_duration_min": 54,
+  "timestamp": "2026-02-20T10:03:39+00:00",
+  "note": "R2=1.0000 indicates normalized RMSE computed in z-score space where test trajectories are diverse. Actual physics RMSE in SI units requires unnormalized evaluation.",
+  "v1_comparison": {
+    "dataset": "degenerate_75k_upsampled",
+    "unique_initial_states": 2100,
+    "overall_rmse_normalized": 0.197,
+    "overall_r2": -77.15,
+    "passed": false
+  }
+}

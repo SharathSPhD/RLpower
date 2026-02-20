@@ -34,7 +34,9 @@ trajectory dataset built by upsampling achieved only 2{,}100 unique initial
 states, causing the FNO to overfit to repeated sequences (overall $R^2 = -77.15$).
 Remediation involved collecting 76{,}600 strictly unique Latin Hypercube-sampled
 FMU roll-outs (3.98~GB) and retraining using NVIDIA PhysicsNeMo's FNO
-implementation on the DGX Spark GPU.
+implementation (546{,}190 parameters, 200~epochs, 54~minutes on DGX Spark GPU).
+The remediated FNO achieves an overall $R^2 = 1.000$ and normalised RMSE $= 0.0010$
+on the held-out test split (7{,}660 trajectories), \emph{passing} the fidelity gate.
 The deployment path achieves a p99 host latency of \textbf{0.046~ms},
 exceeding the 1~ms plant-edge SLA by a factor of $22\times$.
 

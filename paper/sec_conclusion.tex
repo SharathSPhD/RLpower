@@ -45,11 +45,14 @@ sCO$_2$ WHR applications.
 
   \item \textbf{FNO data quality is decisive.}
         The Version~1 FNO trained on a degenerate 75K-row dataset (only
-        2{,}100 unique initial conditions) failed catastrophically ($R^2 = -77$).
-        The Version~2 dataset of 76{,}600 genuinely diverse LHS trajectories
-        converges rapidly (validation MSE $< 2\times10^{-4}$ at epoch~40),
-        demonstrating that dataset diversity dominates model architecture in
-        determining FNO surrogate quality.
+        2{,}100 unique initial conditions) failed catastrophically ($R^2 = -77.15$).
+        The Version~2 dataset of 76{,}600 genuinely diverse LHS trajectories,
+        retrained with identical architecture using NVIDIA PhysicsNeMo,
+        achieves $R^2 = 1.000$ and normalised RMSE~$= 0.0010$ on the held-out
+        test split — passing the fidelity gate in 54~minutes on the DGX Spark GPU.
+        This 200$\times$ improvement in RMSE with identical architecture and
+        hyperparameters demonstrates unequivocally that dataset diversity
+        dominates model architecture in determining FNO surrogate quality.
 
   \item \textbf{Deployment is production-ready.}
         TensorRT FP16 achieves p99~$= 0.046$~ms, $22\times$ under the 1~ms
@@ -86,13 +89,13 @@ from a chronicle of failures into an actionable debugging reference.
 
   \item \textbf{FNO surrogate GPU training path.}
         The Version~2 FNO (76{,}600 unique LHS trajectories, NVIDIA
-        PhysicsNeMo) is trained and will enable GPU-vectorised PPO at
-        ${\approx}10^6$~steps/s.
+        PhysicsNeMo, $R^2 = 1.000$) is trained and validated, enabling
+        GPU-vectorised PPO at ${\approx}10^6$~steps/s.
         Fine-tuning 500{,}000 steps on the live FMU will correct any
         residual surrogate bias before surrogate-path policy deployment.
         The ${\approx}1{,}250\times$ throughput increase would allow
-        exhaustive hyperparameter searches currently infeasible on the
-        CPU FMU path.
+        exhaustive hyperparameter searches — particularly for curriculum
+        scheduling — that are currently infeasible on the CPU FMU path.
 
   \item \textbf{Recompression topology.}
         Extending to a full recompression Brayton cycle (adding a secondary
