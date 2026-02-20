@@ -37,6 +37,11 @@ from sco2rl.analysis.metrics import ControlMetricsSummary, StepResponseResult, F
 from sco2rl.analysis.step_response import run_step_scenario
 from sco2rl.analysis.frequency_analysis import estimate_frequency_response
 
+try:
+    import gymnasium as gym
+except ImportError:
+    gym = None  # type: ignore
+
 
 # ---------------------------------------------------------------------------
 # Env config helpers
@@ -184,6 +189,184 @@ def build_mock_pid() -> Any:
 
 
 # ---------------------------------------------------------------------------
+# MLP surrogate env
+# ---------------------------------------------------------------------------
+
+_MLP_OBS_VARS = [
+    "T_compressor_inlet", "P_high", "T_turbine_inlet", "T_hot_in", "T_hot_out",
+    "P_low", "T_regen", "W_net", "T_comp_out", "W_turbine", "W_main_compressor",
+    "eta_thermal", "p_outlet", "Q_in", "eta_2",
+]
+_MLP_STATE_BOUNDS = [
+    (31.5, 42.0), (70.0, 120.0), (300.0, 1100.0), (200.0, 1100.0), (200.0, 1100.0),
+    (70.0, 120.0), (100.0, 175.0), (31.5, 42.0), (5.0, 25.0), (0.5, 8.0),
+    (0.85, 0.92), (0.90, 0.95), (5.0, 120.0), (15.0, 21.0),
+]
+_MLP_ACTION_BOUNDS = [(0.0, 1.0)] * 4
+_MLP_ACTION_VARS = [
+    "bypass_valve_opening", "igv_angle_normalized",
+    "inventory_valve_opening", "cooling_flow_normalized",
+]
+_MLP_PID_CONFIG: dict[str, Any] = {
+    "obs_vars": _MLP_OBS_VARS,
+    "action_vars": _MLP_ACTION_VARS,
+    "n_obs": len(_MLP_OBS_VARS),
+    "history_steps": 1,
+    "dt": 5.0,
+    "gains": {
+        "bypass_valve_opening": {"kp": 0.25, "ki": 0.010, "kd": 0.50,
+            "anti_windup_gain": 0.10, "derivative_filter_tau": 10.0},
+        "igv_angle_normalized": {"kp": 0.010, "ki": 0.0002, "kd": 0.05,
+            "anti_windup_gain": 0.10, "derivative_filter_tau": 15.0},
+        "inventory_valve_opening": {"kp": 0.30, "ki": 0.010, "kd": 0.50,
+            "anti_windup_gain": 0.10, "derivative_filter_tau": 10.0},
+        "cooling_flow_normalized": {"kp": 0.20, "ki": 0.008, "kd": 0.40,
+            "anti_windup_gain": 0.10, "derivative_filter_tau": 10.0},
+    },
+    "setpoints": {"W_net": 10.0, "T_turbine_inlet": 750.0, "P_high": 95.0, "T_compressor_inlet": 36.75},
+    "measurement_indices": {
+        "bypass_valve_opening": 7, "igv_angle_normalized": 2,
+        "inventory_valve_opening": 1, "cooling_flow_normalized": 0,
+    },
+}
+
+
+class MLPStepEnv:
+    """Gymnasium-compatible env wrapping the MLP step predictor."""
+
+    def __init__(self, model: Any, norm: dict[str, np.ndarray], seed: int = 42) -> None:
+        import torch
+        self._model = model
+        self._norm = norm
+        self._seed = seed
+        self._rng = np.random.default_rng(seed)
+        n_s = int(norm["s_mean"].shape[0])
+        n_a = int(norm["a_mean"].shape[0])
+        self._n_s = n_s
+        self._n_a = n_a
+        self._s_mean = np.array(norm["s_mean"], dtype=np.float32)
+        self._s_std = np.array(norm["s_std"], dtype=np.float32)
+        self._a_mean = np.array(norm["a_mean"], dtype=np.float32)
+        self._a_std = np.array(norm["a_std"], dtype=np.float32)
+        self._sp_mean = np.array(norm["sp_mean"], dtype=np.float32)
+        self._sp_std = np.array(norm["sp_std"], dtype=np.float32)
+        lo = np.array([b[0] for b in _MLP_STATE_BOUNDS[:n_s]], dtype=np.float32)
+        hi = np.array([b[1] for b in _MLP_STATE_BOUNDS[:n_s]], dtype=np.float32)
+        self._design_pt = 0.5 * (lo + hi)
+        self._state = np.zeros(n_s, dtype=np.float32)
+        self._prev_action = np.zeros(n_a, dtype=np.float32)
+        self._episode_max_steps = 200
+        self._step_count = 0
+        self._obs_vars = _MLP_OBS_VARS
+        self._history_steps = 1
+        self._base_setpoint = {"W_net": 10.0}
+        self._setpoint = {"W_net": 10.0}
+        self._curriculum_phase = 0
+        if gym is not None:
+            self.observation_space = gym.spaces.Box(
+                low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32
+            )
+            self.action_space = gym.spaces.Box(
+                low=-1.0, high=1.0, shape=(n_a,), dtype=np.float32
+            )
+        else:
+            self.observation_space = None
+            self.action_space = None
+
+    def _state_to_obs(self, state: np.ndarray) -> np.ndarray:
+        w_net = float(state[8] - state[9])
+        return np.concatenate([state[:7], np.array([w_net], dtype=np.float32), state[7:14]]).astype(np.float32)
+
+    def set_curriculum_phase(self, phase: int, episode_max_steps: int = 200) -> None:
+        self._curriculum_phase = phase
+        self._episode_max_steps = episode_max_steps
+
+    def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict]:
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+        self._state = np.clip(
+            self._design_pt + self._rng.standard_normal(self._n_s).astype(np.float32) * 0.01,
+            [b[0] for b in _MLP_STATE_BOUNDS[:self._n_s]],
+            [b[1] for b in _MLP_STATE_BOUNDS[:self._n_s]],
+        )
+        self._prev_action[:] = 0.0
+        self._step_count = 0
+        return self._state_to_obs(self._state), {}
+
+    def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
+        import torch
+        action = np.clip(np.asarray(action, dtype=np.float32).flatten(), -1.0, 1.0)
+        a_phys = np.array([0.5 * (lo + hi) for (lo, hi) in _MLP_ACTION_BOUNDS], dtype=np.float32)
+        a_phys = a_phys + 0.5 * (action + 1.0) * np.array([hi - lo for (lo, hi) in _MLP_ACTION_BOUNDS], dtype=np.float32)
+        a_phys = np.clip(a_phys, 0.0, 1.0)
+        s_n = (self._state - self._s_mean) / self._s_std
+        a_n = (a_phys - self._a_mean) / self._a_std
+        with torch.no_grad():
+            s_t = torch.from_numpy(s_n).float().unsqueeze(0)
+            a_t = torch.from_numpy(a_n).float().unsqueeze(0)
+            sp_n = self._model(s_t, a_t).squeeze(0).numpy()
+        next_state = np.clip(sp_n * self._sp_std + self._sp_mean,
+            [b[0] for b in _MLP_STATE_BOUNDS[:self._n_s]],
+            [b[1] for b in _MLP_STATE_BOUNDS[:self._n_s]])
+        self._state = next_state
+        self._prev_action[:] = action
+        self._step_count += 1
+        terminated = float(next_state[0]) < 32.2
+        truncated = self._step_count >= self._episode_max_steps
+        W_net = float(next_state[8] - next_state[9])
+        target = self._setpoint.get("W_net", 10.0)
+        reward = -abs(W_net - target) / max(target, 1.0) - (100.0 if terminated else 0.0)
+        return self._state_to_obs(next_state), float(reward), bool(terminated), bool(truncated), {}
+
+    def close(self) -> None:
+        pass
+
+
+def build_mlp_env(
+    mlp_model_path: str | Path = "artifacts/surrogate/mlp_step.pt",
+    norm_path: str | Path = "artifacts/surrogate/mlp_step_norm.npz",
+    seed: int = 42,
+) -> MLPStepEnv:
+    """Build MLPStepEnv with lazily loaded MLP model."""
+    import torch
+    path = Path(mlp_model_path)
+    norm_path = Path(norm_path)
+    proj = Path(__file__).resolve().parent.parent.parent.parent
+    if not path.is_absolute():
+        path = proj / path
+    if not norm_path.is_absolute():
+        norm_path = proj / norm_path
+    if not path.exists():
+        raise FileNotFoundError(f"MLP model not found: {path}")
+    if not norm_path.exists():
+        raise FileNotFoundError(f"Norm file not found: {norm_path}")
+    norm = dict(np.load(norm_path))
+    n_s, n_a = int(norm["s_mean"].shape[0]), int(norm["a_mean"].shape[0])
+
+    class _MLP(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            layers = [torch.nn.Linear(n_s + n_a, 512), torch.nn.SiLU()]
+            for _ in range(3):
+                layers += [torch.nn.Linear(512, 512), torch.nn.SiLU()]
+            layers.append(torch.nn.Linear(512, n_s))
+            self.net = torch.nn.Sequential(*layers)
+        def forward(self, s, a):
+            return s + self.net(torch.cat([s, a], dim=-1))
+
+    model = _MLP()
+    model.load_state_dict(torch.load(path, weights_only=True, map_location="cpu"))
+    model.eval()
+    return MLPStepEnv(model=model, norm=norm, seed=seed)
+
+
+def build_mlp_pid() -> Any:
+    """Build MultiLoopPID with MLP obs/action variable names."""
+    from sco2rl.control.multi_loop_pid import MultiLoopPID
+    return MultiLoopPID(config=_MLP_PID_CONFIG)
+
+
+# ---------------------------------------------------------------------------
 # Scenario definitions
 # ---------------------------------------------------------------------------
 
@@ -305,6 +488,7 @@ class ScenarioRunner:
         phases: list[int] | None = None,
         scenarios: list[ControlScenario] | None = None,
         run_frequency: bool = True,
+        freq_env_factory: Callable[[], Any] | None = None,
     ) -> list[ControlMetricsSummary]:
         """Run the full analysis battery.
 
@@ -356,6 +540,9 @@ class ScenarioRunner:
                 summaries.append(summary)
 
         if run_frequency:
+            freq_factory = freq_env_factory if freq_env_factory is not None else (
+                lambda: build_mock_env(dynamic=True)
+            )
             for phase in phases:
                 if self._verbose:
                     print(f"  Phase {phase} | frequency response ...", flush=True)
@@ -363,20 +550,23 @@ class ScenarioRunner:
                 freq_summary = ControlMetricsSummary(
                     phase=phase, scenario=ControlScenario.FREQUENCY_RESPONSE.value
                 )
-                dynamic_factory = lambda: build_mock_env(dynamic=True)
 
                 if pid_policy is not None:
-                    freq_summary.pid_freq = self.run_frequency(dynamic_factory, pid_policy, phase)
+                    freq_summary.pid_freq = self.run_frequency(freq_factory, pid_policy, phase)
 
                 if rl_policy is not None:
-                    freq_summary.rl_freq = self.run_frequency(dynamic_factory, rl_policy, phase)
+                    freq_summary.rl_freq = self.run_frequency(freq_factory, rl_policy, phase)
 
                 summaries.append(freq_summary)
 
         return summaries
 
     @staticmethod
-    def save(results: list[ControlMetricsSummary], output_path: str | Path) -> None:
+    def save(
+        results: list[ControlMetricsSummary],
+        output_path: str | Path,
+        env_type: str = "MockFMU",
+    ) -> None:
         """Serialise results to JSON.
 
         Parameters
@@ -385,6 +575,8 @@ class ScenarioRunner:
             List of ControlMetricsSummary from ``run_all()``.
         output_path:
             Destination path (parent directories are created if needed).
+        env_type:
+            Environment type for metadata (e.g. "MockFMU", "MLP").
         """
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -393,7 +585,7 @@ class ScenarioRunner:
             "version": "1.0",
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "generated_by": "sco2rl.analysis.scenario_runner.ScenarioRunner",
-            "env": "MockFMU",
+            "env": env_type,
             "results": [dataclasses.asdict(r) for r in results],
         }
         with open(path, "w", encoding="utf-8") as fh:

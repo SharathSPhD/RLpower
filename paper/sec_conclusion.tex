@@ -3,24 +3,43 @@
 %% ---------------------------------------------------------------------------
 
 This paper presents sCO2RL, a complete end-to-end reinforcement learning pipeline
-for autonomous control of a supercritical CO$_2$ recompression Brayton cycle
+for autonomous control of a supercritical CO$_2$ recuperated Brayton cycle
 recovering waste heat from steel industry furnace exhaust.
 The system integrates physics-faithful FMU simulation, structured curriculum RL
-with Lagrangian safety constraints, NVIDIA PhysicsNeMo FNO surrogate training,
-and TensorRT-FP16 deployment — the first such openly-published combination for
-sCO$_2$ WHR applications.
+with Lagrangian safety constraints, an MLP step-predictor surrogate enabling
+GPU-vectorised training at 250{,}000~steps/s, NVIDIA PhysicsNeMo FNO surrogate
+validation, and TensorRT-FP16 deployment — the first such openly-published
+combination for sCO$_2$ WHR applications.
 
 \textbf{Key empirical findings.}
 \begin{itemize}
   \item \textbf{RL surpasses Ziegler--Nichols PID on well-trained phases.}
-        The 5{,}013{,}504-step policy achieves $+30.3\%$, $+30.4\%$, and
-        $+39.0\%$ cumulative episode reward improvement over ZN-tuned PID
+        The 5{,}013{,}504-step FMU-direct policy achieves $+30.3\%$, $+30.4\%$,
+        and $+39.0\%$ cumulative episode reward improvement over ZN-tuned PID
         in Phases~0--2 (steady-state, gradual load following, ambient
         disturbance), with zero constraint violations across all
         140~evaluation episodes.
         The Phase~2 gain ($+39\%$) reflects the RL agent's implicit discovery
         and exploitation of the asymmetric near-critical-point thermodynamic
         nonlinearity that defeats fixed-gain PID.
+
+  \item \textbf{MLP surrogate enables rapid, high-fidelity RL training.}
+        The residual MLP step predictor (4~layers, 512~hidden units, trained on
+        55M transitions in 8.5~min) achieves val\_loss $= 5{\times}10^{-6}$
+        and enables GPU-vectorised PPO at 250{,}000~steps/s — over $470\times$
+        faster than the CPU FMU path.
+        The MLP-trained policy achieves 18.5$\times$ lower net-power tracking
+        error than the PID baseline (0.122~MW vs.\ 2.259~MW) in just
+        23~minutes of training, validating the surrogate path as an
+        effective route for rapid policy development before FMU fine-tuning.
+
+  \item \textbf{FNO is architecturally incompatible with step-by-step RL.}
+        Despite achieving $R^2 = 1.000$ on full trajectory reconstruction,
+        the FNO cannot be used directly for RL without modification: its
+        non-causal global Fourier convolutions produce spectral aliasing when
+        queried step-by-step, causing policy gradient collapse.
+        This finding is an important negative result for practitioners
+        considering FNO surrogates for RL training.
 
   \item \textbf{Curriculum imbalance limits Phases 3--6.}
         Phases~3--6 (EAF transients, load rejection, cold startup, emergency
@@ -30,18 +49,11 @@ sCO$_2$ WHR applications.
         confirm the agent can outperform PID given sufficient training — but
         a curriculum resource allocation failure.
 
-  \item \textbf{Interleaved replay causes catastrophic interference.}
-        A 30\% replay ratio applied directly to the Phase~6-specialised
-        5M checkpoint produced universal performance regression across all
-        phases, including Phase~6 itself.
-        A gradual cosine-annealed schedule (starting at $\leq$5\%) is
-        strongly recommended for future replay experiments.
-
   \item \textbf{Safety is unconditionally maintained.}
-        Zero CO$_2$ critical-point constraint violations across all 210
-        evaluation episodes (140 final policy + 70 interleaved policy)
-        confirms that the Lagrangian safety mechanism functions correctly
-        regardless of reward-level policy quality.
+        Zero CO$_2$ critical-point constraint violations across all evaluation
+        episodes (FMU-direct: 140~episodes; MLP surrogate: 100~episodes)
+        confirms that the Lagrangian safety mechanism and rate-limited action
+        space function correctly regardless of reward-level policy quality.
 
   \item \textbf{FNO data quality is decisive.}
         The Version~1 FNO trained on a degenerate 75K-row dataset (only
@@ -50,9 +62,6 @@ sCO$_2$ WHR applications.
         retrained with identical architecture using NVIDIA PhysicsNeMo,
         achieves $R^2 = 1.000$ and normalised RMSE~$= 0.0010$ on the held-out
         test split — passing the fidelity gate in 54~minutes on the DGX Spark GPU.
-        This 200$\times$ improvement in RMSE with identical architecture and
-        hyperparameters demonstrates unequivocally that dataset diversity
-        dominates model architecture in determining FNO surrogate quality.
 
   \item \textbf{Deployment is production-ready.}
         TensorRT FP16 achieves p99~$= 0.046$~ms, $22\times$ under the 1~ms
@@ -68,8 +77,10 @@ Three of the five (normalisation persistence, episode boundary detection,
 reward unit double-scaling) are not sCO$_2$-specific — they are latent
 failure modes in any FMU-Gym-SB3 integration, and existing frameworks
 (ModelicaGym, FMUGym, BOPTEST-Gym) do not address them.
-Including detection strategies alongside the bugs themselves transforms this
-from a chronicle of failures into an actionable debugging reference.
+Additionally, the FNO-RL incompatibility finding provides concrete guidance:
+FNO surrogates are excellent for physics-operator learning but require
+either causal masking during training or architectural replacement (e.g.\ MLP,
+GRU, or causal FNO) before use in step-by-step RL loops.
 
 \textbf{Future work.}
 \begin{enumerate}
@@ -80,22 +91,24 @@ from a chronicle of failures into an actionable debugging reference.
         Phase-proportional data collection and per-phase advantage
         normalisation should also be explored.
 
+  \item \textbf{FMU fine-tuning of MLP-trained policy.}
+        The MLP-trained policy serves as an excellent initialisation for
+        FMU fine-tuning.
+        500{,}000 fine-tuning steps on the live FMU should correct any
+        residual surrogate bias and bring performance to FMU-direct
+        levels while retaining the training speed advantages.
+
+  \item \textbf{Causal FNO for RL.}
+        Adding causal masking to the FNO's Fourier convolutions (so each
+        output step attends only to past inputs) would enable FNO-based RL
+        while retaining the operator's long-range temporal modelling capacity.
+
   \item \textbf{Continual learning for multi-phase retention.}
         Elastic weight consolidation~\cite{kirkpatrick2017ewc} or
         progressive neural networks~\cite{rusu2016progressive} would allow
         sequential phase deepening without catastrophic forgetting, without
         requiring the careful replay scheduling needed by the interleaved
         approach.
-
-  \item \textbf{FNO surrogate GPU training path.}
-        The Version~2 FNO (76{,}600 unique LHS trajectories, NVIDIA
-        PhysicsNeMo, $R^2 = 1.000$) is trained and validated, enabling
-        GPU-vectorised PPO at ${\approx}10^6$~steps/s.
-        Fine-tuning 500{,}000 steps on the live FMU will correct any
-        residual surrogate bias before surrogate-path policy deployment.
-        The ${\approx}1{,}250\times$ throughput increase would allow
-        exhaustive hyperparameter searches — particularly for curriculum
-        scheduling — that are currently infeasible on the CPU FMU path.
 
   \item \textbf{Recompression topology.}
         Extending to a full recompression Brayton cycle (adding a secondary

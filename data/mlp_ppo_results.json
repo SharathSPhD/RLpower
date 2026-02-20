@@ -1,0 +1,1433 @@
+{
+  "version": "1.0",
+  "description": "PPO-MLP surrogate evaluation results (successful path)",
+  "env_type": "MLPSurrogateEnv",
+  "surrogate": "mlp_step.pt (val_loss=5e-6, 55M transitions)",
+  "training_steps": 5000000,
+  "training_time_minutes": 23,
+  "training_throughput_steps_per_s": 250000,
+  "n_parallel_envs": 1024,
+  "eval_episodes": 100,
+  "results": {
+    "rl": {
+      "mean_reward": 27.137428264958533,
+      "std_reward": 7.760022845658014,
+      "W_net_mean": 9.877571582531928,
+      "eta_mean": 0.8852931851208209,
+      "ep_len_mean": 200.0,
+      "unsafe_count": 0
+    },
+    "pid": {
+      "mean_reward": -15.111365813527776,
+      "std_reward": 7.487544789163383,
+      "W_net_mean": 12.258545294642449,
+      "eta_mean": 0.8850694634258748,
+      "ep_len_mean": 200.0,
+      "unsafe_count": 0
+    },
+    "rl_episodes": [
+      {
+        "total_reward": 20.54231423650472,
+        "W_net_mean": 9.85117522239685,
+        "eta_mean": 0.8781930333375931,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 26.27392249788559,
+        "W_net_mean": 9.85971479177475,
+        "eta_mean": 0.8846755909919739,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 35.126551399912145,
+        "W_net_mean": 9.89723811507225,
+        "eta_mean": 0.8941489207744598,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 27.839068947519593,
+        "W_net_mean": 9.850722023248672,
+        "eta_mean": 0.8866544860601425,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 28.430368355342335,
+        "W_net_mean": 9.88016390800476,
+        "eta_mean": 0.8867193472385406,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 28.219852604184844,
+        "W_net_mean": 9.850041108131409,
+        "eta_mean": 0.8871427178382874,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 27.349584368297037,
+        "W_net_mean": 9.847263314723968,
+        "eta_mean": 0.8862045657634735,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 30.522206068038972,
+        "W_net_mean": 9.87539705991745,
+        "eta_mean": 0.8892789781093597,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 33.185706346375596,
+        "W_net_mean": 9.889127646684647,
+        "eta_mean": 0.892049600481987,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 10.63866193975723,
+        "W_net_mean": 9.972339388132095,
+        "eta_mean": 0.8641276657581329,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 19.349184070314703,
+        "W_net_mean": 9.846359095573426,
+        "eta_mean": 0.8768991059064866,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 41.00084469318391,
+        "W_net_mean": 9.941174343824386,
+        "eta_mean": 0.9000158977508544,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 25.81205643245155,
+        "W_net_mean": 9.85756711959839,
+        "eta_mean": 0.8841741222143173,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 29.858310559817756,
+        "W_net_mean": 9.865434876680375,
+        "eta_mean": 0.8887127006053924,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 50.6612229347229,
+        "W_net_mean": 9.996873903274537,
+        "eta_mean": 0.9108583229780197,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.6400523356029,
+        "W_net_mean": 9.877135046720504,
+        "eta_mean": 0.8916677951812744,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 27.024218460491728,
+        "W_net_mean": 9.84975125193596,
+        "eta_mean": 0.8857771843671799,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 8.305429349626829,
+        "W_net_mean": 10.004053256511689,
+        "eta_mean": 0.8617037564516068,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 18.25262474673135,
+        "W_net_mean": 9.864094468355178,
+        "eta_mean": 0.87518086373806,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 19.422495463916245,
+        "W_net_mean": 9.856442161798476,
+        "eta_mean": 0.876749050617218,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 25.3807667357581,
+        "W_net_mean": 9.850014086961746,
+        "eta_mean": 0.8838380581140518,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 31.454180046490265,
+        "W_net_mean": 9.881421345472337,
+        "eta_mean": 0.8902120488882065,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 30.61437080928259,
+        "W_net_mean": 9.888756923675537,
+        "eta_mean": 0.8890871769189834,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 28.60090717247555,
+        "W_net_mean": 9.85946251988411,
+        "eta_mean": 0.887385509610176,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 24.403425584520626,
+        "W_net_mean": 9.859954769611358,
+        "eta_mean": 0.8825108915567398,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 23.831673734528707,
+        "W_net_mean": 9.845651689767838,
+        "eta_mean": 0.8821309030055999,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 26.590354384694802,
+        "W_net_mean": 9.862844403982162,
+        "eta_mean": 0.884970246553421,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 21.637316032818397,
+        "W_net_mean": 9.838764497041701,
+        "eta_mean": 0.8797518545389176,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 35.2904244354793,
+        "W_net_mean": 9.897432551383972,
+        "eta_mean": 0.8943352293968201,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 22.52203530243467,
+        "W_net_mean": 9.836850048303605,
+        "eta_mean": 0.8808269023895263,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 25.958123850822464,
+        "W_net_mean": 9.85659230351448,
+        "eta_mean": 0.884366649389267,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 43.32991977419173,
+        "W_net_mean": 9.97085322856903,
+        "eta_mean": 0.9020827943086625,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 20.642011778695256,
+        "W_net_mean": 9.85446106672287,
+        "eta_mean": 0.8782250601053238,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 16.840285730361956,
+        "W_net_mean": 9.857241249084472,
+        "eta_mean": 0.8737124961614608,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 31.759710625239798,
+        "W_net_mean": 9.884411852359772,
+        "eta_mean": 0.8905202728509903,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 20.435233446529953,
+        "W_net_mean": 9.832876690626144,
+        "eta_mean": 0.8784590429067611,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.7300093616758,
+        "W_net_mean": 9.88433303952217,
+        "eta_mean": 0.8916360092163086,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 14.078419988495988,
+        "W_net_mean": 9.899533320665359,
+        "eta_mean": 0.8694941276311874,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 38.25727754320418,
+        "W_net_mean": 9.93015319108963,
+        "eta_mean": 0.8970270502567291,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 27.390905805996503,
+        "W_net_mean": 9.85246169924736,
+        "eta_mean": 0.8861340850591659,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 27.692330455780034,
+        "W_net_mean": 9.860054268836976,
+        "eta_mean": 0.8863265824317932,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 19.955649484906896,
+        "W_net_mean": 9.86337818622589,
+        "eta_mean": 0.8772307461500168,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 34.480098431451,
+        "W_net_mean": 9.908251953125,
+        "eta_mean": 0.8931518828868866,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 34.8240334749222,
+        "W_net_mean": 9.895768965482711,
+        "eta_mean": 0.8938015908002853,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 33.80489627974376,
+        "W_net_mean": 9.895889620780945,
+        "eta_mean": 0.892641960978508,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 25.621170146124726,
+        "W_net_mean": 9.845024108886719,
+        "eta_mean": 0.8842360490560531,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 28.711542228290053,
+        "W_net_mean": 9.85748594880104,
+        "eta_mean": 0.8875611847639084,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 26.117400210244337,
+        "W_net_mean": 9.862699723243713,
+        "eta_mean": 0.884438061118126,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.89949187551225,
+        "W_net_mean": 9.889441585540771,
+        "eta_mean": 0.8917116171121597,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 24.477579208782753,
+        "W_net_mean": 9.854164198637008,
+        "eta_mean": 0.8827318459749222,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 15.026826105799016,
+        "W_net_mean": 9.880913914442063,
+        "eta_mean": 0.8710422086715698,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 23.378060633795638,
+        "W_net_mean": 9.85642284154892,
+        "eta_mean": 0.8813860589265823,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 23.163364546639595,
+        "W_net_mean": 9.855085813999176,
+        "eta_mean": 0.8811410772800445,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 22.946439930370893,
+        "W_net_mean": 9.854516726732253,
+        "eta_mean": 0.8809138888120651,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 48.26146193231856,
+        "W_net_mean": 9.956817555427552,
+        "eta_mean": 0.9080949187278747,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 30.394452060971954,
+        "W_net_mean": 9.88779918193817,
+        "eta_mean": 0.8888250911235809,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 30.80529967716765,
+        "W_net_mean": 9.864638040065765,
+        "eta_mean": 0.8898363792896271,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 18.93065310886929,
+        "W_net_mean": 9.848115520477295,
+        "eta_mean": 0.8763522505760193,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 23.90023738997327,
+        "W_net_mean": 9.844971742630005,
+        "eta_mean": 0.8822431832551956,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 35.72699660573688,
+        "W_net_mean": 9.911978855133057,
+        "eta_mean": 0.894515853524208,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 30.959712079593125,
+        "W_net_mean": 9.876891709566117,
+        "eta_mean": 0.8897352999448777,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 17.336499459402923,
+        "W_net_mean": 9.856179168224335,
+        "eta_mean": 0.8742730540037155,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 17.03754336493358,
+        "W_net_mean": 9.858652300834656,
+        "eta_mean": 0.8739041113853454,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 35.03711248465948,
+        "W_net_mean": 9.910513223409653,
+        "eta_mean": 0.8937142395973205,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 28.07664502688818,
+        "W_net_mean": 9.850169579982758,
+        "eta_mean": 0.8869959700107575,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.809451120240354,
+        "W_net_mean": 9.908574026823043,
+        "eta_mean": 0.8911810725927353,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 28.551462033816748,
+        "W_net_mean": 9.859890261888504,
+        "eta_mean": 0.8873243510723114,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 20.354662884984723,
+        "W_net_mean": 9.844189385175705,
+        "eta_mean": 0.8781000542640686,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 30.525352631296442,
+        "W_net_mean": 9.852217868566512,
+        "eta_mean": 0.8897770583629608,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 30.92285570076535,
+        "W_net_mean": 9.87177120089531,
+        "eta_mean": 0.8898247510194779,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 28.746337127685575,
+        "W_net_mean": 9.881244170665742,
+        "eta_mean": 0.8870891541242599,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.910849741526995,
+        "W_net_mean": 9.888030650615692,
+        "eta_mean": 0.8917710691690445,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 20.52777880600523,
+        "W_net_mean": 9.840652650594711,
+        "eta_mean": 0.8783923798799514,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 13.228750010899141,
+        "W_net_mean": 9.904261639118195,
+        "eta_mean": 0.8683683913946152,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 40.9932675259454,
+        "W_net_mean": 9.950584057569504,
+        "eta_mean": 0.8997567665576934,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 18.80538221767972,
+        "W_net_mean": 9.843996391296386,
+        "eta_mean": 0.876317098736763,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 18.442705372401655,
+        "W_net_mean": 9.861601364612579,
+        "eta_mean": 0.8755157613754272,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 25.298896210534227,
+        "W_net_mean": 9.873459942340851,
+        "eta_mean": 0.8832348710298539,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 31.107118415832556,
+        "W_net_mean": 9.888982617855072,
+        "eta_mean": 0.8896677762269973,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 31.038483881950402,
+        "W_net_mean": 9.869490562677383,
+        "eta_mean": 0.8899940437078476,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 17.95098710060121,
+        "W_net_mean": 9.849252927303315,
+        "eta_mean": 0.8751890778541564,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 31.648440207753886,
+        "W_net_mean": 9.890742233991624,
+        "eta_mean": 0.8902303218841553,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 23.655887913703943,
+        "W_net_mean": 9.831875530481339,
+        "eta_mean": 0.882250617146492,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.60454214641028,
+        "W_net_mean": 9.89001891374588,
+        "eta_mean": 0.8913705360889435,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 24.546809022767206,
+        "W_net_mean": 9.840720099210738,
+        "eta_mean": 0.8830722296237945,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 27.72119196483067,
+        "W_net_mean": 9.859655995368957,
+        "eta_mean": 0.8863639003038406,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 24.67242899962836,
+        "W_net_mean": 9.849833084344864,
+        "eta_mean": 0.8830507653951645,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 18.908767185892387,
+        "W_net_mean": 9.860581966638565,
+        "eta_mean": 0.8760763317346573,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 13.92350207396918,
+        "W_net_mean": 9.895699704885482,
+        "eta_mean": 0.8694280445575714,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 35.91268721648626,
+        "W_net_mean": 9.895722790956498,
+        "eta_mean": 0.8951021802425384,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 27.35573264190131,
+        "W_net_mean": 9.877198468446732,
+        "eta_mean": 0.8855474346876144,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.325355683054255,
+        "W_net_mean": 9.894092794656753,
+        "eta_mean": 0.8909567832946778,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 22.722341956411107,
+        "W_net_mean": 9.863431535959243,
+        "eta_mean": 0.880452870130539,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 42.75752161911557,
+        "W_net_mean": 9.957070356607437,
+        "eta_mean": 0.9016630852222443,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 11.74206396852223,
+        "W_net_mean": 9.938533989191056,
+        "eta_mean": 0.8658831596374512,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 26.217695042065223,
+        "W_net_mean": 9.856493626832963,
+        "eta_mean": 0.8847014755010605,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.674509944234586,
+        "W_net_mean": 9.894208196401596,
+        "eta_mean": 0.8913650190830231,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 36.11332927771982,
+        "W_net_mean": 9.901992603540421,
+        "eta_mean": 0.8952045023441315,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 21.723957998412004,
+        "W_net_mean": 9.851752156019211,
+        "eta_mean": 0.8795458090305328,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 32.53419669355666,
+        "W_net_mean": 9.897371174097062,
+        "eta_mean": 0.8911045473814011,
+        "episode_len": 200,
+        "unsafe_termination": false
+      }
+    ],
+    "pid_episodes": [
+      {
+        "total_reward": -21.21909085682457,
+        "W_net_mean": 12.25876116514206,
+        "eta_mean": 0.8779488211870193,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -15.665157839230108,
+        "W_net_mean": 12.2597885119915,
+        "eta_mean": 0.8844523811340332,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -7.505516348566312,
+        "W_net_mean": 12.258925379514695,
+        "eta_mean": 0.8939518231153488,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -13.833453311238955,
+        "W_net_mean": 12.252974935770034,
+        "eta_mean": 0.8864303863048554,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -13.962148809432964,
+        "W_net_mean": 12.262608666419982,
+        "eta_mean": 0.8865050286054611,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -13.460302097456774,
+        "W_net_mean": 12.255434840917587,
+        "eta_mean": 0.8869231271743775,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -14.276609008652814,
+        "W_net_mean": 12.255801554918289,
+        "eta_mean": 0.8859793257713318,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -11.72005733421869,
+        "W_net_mean": 12.260153895616531,
+        "eta_mean": 0.8890635240077972,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -9.33763469968522,
+        "W_net_mean": 12.260245740413666,
+        "eta_mean": 0.8918451601266861,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -33.386536949021476,
+        "W_net_mean": 12.26278837800026,
+        "eta_mean": 0.8638474357128143,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -22.2792634998049,
+        "W_net_mean": 12.255957344770431,
+        "eta_mean": 0.8766465306282043,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -2.5226183618817886,
+        "W_net_mean": 12.261875200271607,
+        "eta_mean": 0.8998340332508087,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -16.07708710261751,
+        "W_net_mean": 12.258779628276825,
+        "eta_mean": 0.8839482563734055,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -12.144850965908581,
+        "W_net_mean": 12.257175298929214,
+        "eta_mean": 0.8884984308481216,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 6.780243049349116,
+        "W_net_mean": 12.262178976535797,
+        "eta_mean": 0.9106944596767426,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -9.594794675282055,
+        "W_net_mean": 12.256732122898102,
+        "eta_mean": 0.89146315574646,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -14.67711889743803,
+        "W_net_mean": 12.257587951421737,
+        "eta_mean": 0.8855537468194962,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -35.39257165704451,
+        "W_net_mean": 12.258738950490951,
+        "eta_mean": 0.8614125752449036,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -23.78966462271553,
+        "W_net_mean": 12.25787873506546,
+        "eta_mean": 0.874929228425026,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -22.44972421101161,
+        "W_net_mean": 12.258269610404968,
+        "eta_mean": 0.8765016126632691,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -16.32433809893471,
+        "W_net_mean": 12.256750313043595,
+        "eta_mean": 0.8836124461889266,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -10.882627609797865,
+        "W_net_mean": 12.258429560661316,
+        "eta_mean": 0.8900002908706665,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -11.958192896842947,
+        "W_net_mean": 12.26409556031227,
+        "eta_mean": 0.8888776713609695,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -13.309258822032366,
+        "W_net_mean": 12.258335015773774,
+        "eta_mean": 0.8871670150756836,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -17.542814823559343,
+        "W_net_mean": 12.260570813417434,
+        "eta_mean": 0.8822800350189209,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -17.780676943915214,
+        "W_net_mean": 12.256033933162689,
+        "eta_mean": 0.8818966686725617,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -15.42925040381295,
+        "W_net_mean": 12.260606853961944,
+        "eta_mean": 0.8847467011213302,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -19.813143587112428,
+        "W_net_mean": 12.255236654281616,
+        "eta_mean": 0.8795068544149399,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -7.337318512371591,
+        "W_net_mean": 12.25849396109581,
+        "eta_mean": 0.8941379874944687,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -18.871053658212908,
+        "W_net_mean": 12.254521831274033,
+        "eta_mean": 0.880589280128479,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -15.907051059177931,
+        "W_net_mean": 12.258501453399658,
+        "eta_mean": 0.8841401410102844,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -0.7960224969046326,
+        "W_net_mean": 12.2646196269989,
+        "eta_mean": 0.9019124317169189,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -21.202564450672668,
+        "W_net_mean": 12.2592760515213,
+        "eta_mean": 0.8779801160097123,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -24.971717040879362,
+        "W_net_mean": 12.253630031347274,
+        "eta_mean": 0.8734510308504104,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -10.658946251869189,
+        "W_net_mean": 12.26049823641777,
+        "eta_mean": 0.8903095215559006,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -20.8469907249723,
+        "W_net_mean": 12.251284030675889,
+        "eta_mean": 0.8782084715366364,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -9.659631228446951,
+        "W_net_mean": 12.258643089532852,
+        "eta_mean": 0.8914321023225784,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -28.663364386558506,
+        "W_net_mean": 12.257093833684921,
+        "eta_mean": 0.8692249310016632,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -5.050239780970965,
+        "W_net_mean": 12.260000290870666,
+        "eta_mean": 0.8968413937091827,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -14.357461268561215,
+        "W_net_mean": 12.256898055076599,
+        "eta_mean": 0.8859105831384659,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -14.246751632009225,
+        "W_net_mean": 12.259787672758103,
+        "eta_mean": 0.8861071687936782,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -22.092359995841967,
+        "W_net_mean": 12.261188136339188,
+        "eta_mean": 0.8769866365194321,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -8.434983045714223,
+        "W_net_mean": 12.262801250219345,
+        "eta_mean": 0.8929578822851181,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -7.780582482474179,
+        "W_net_mean": 12.25767382144928,
+        "eta_mean": 0.8936017096042633,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -8.823763448851436,
+        "W_net_mean": 12.26000207543373,
+        "eta_mean": 0.8924389910697937,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -15.974525308608998,
+        "W_net_mean": 12.256213788986207,
+        "eta_mean": 0.8840080422163009,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -13.131499273436399,
+        "W_net_mean": 12.256863576173782,
+        "eta_mean": 0.8873400676250458,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -15.9074611050742,
+        "W_net_mean": 12.261726326942444,
+        "eta_mean": 0.8842149096727371,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -9.61234265395572,
+        "W_net_mean": 12.259353519678116,
+        "eta_mean": 0.891503849029541,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -17.35047559397559,
+        "W_net_mean": 12.260432242155074,
+        "eta_mean": 0.8825011974573136,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -27.308107369286656,
+        "W_net_mean": 12.255779747962952,
+        "eta_mean": 0.8707754021883011,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -18.53873656477246,
+        "W_net_mean": 12.262160068750381,
+        "eta_mean": 0.8811552089452743,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -18.686752384049516,
+        "W_net_mean": 12.258813222646713,
+        "eta_mean": 0.8809044307470322,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -18.89891719136918,
+        "W_net_mean": 12.259860639572144,
+        "eta_mean": 0.8806813448667526,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": 4.54503577436721,
+        "W_net_mean": 12.255289372205734,
+        "eta_mean": 0.9079259604215622,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -12.099985548428105,
+        "W_net_mean": 12.260114234685897,
+        "eta_mean": 0.8886193490028381,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -11.173383716174522,
+        "W_net_mean": 12.256853190660477,
+        "eta_mean": 0.8896242934465408,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -22.72150928974149,
+        "W_net_mean": 12.254577008485795,
+        "eta_mean": 0.8760983693599701,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -17.70995729650768,
+        "W_net_mean": 12.257177869081497,
+        "eta_mean": 0.8820058667659759,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -7.239901362146638,
+        "W_net_mean": 12.26153260588646,
+        "eta_mean": 0.8943225425481797,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -11.320024861608221,
+        "W_net_mean": 12.25985130906105,
+        "eta_mean": 0.8895231682062149,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -24.477254002434847,
+        "W_net_mean": 12.253074655532837,
+        "eta_mean": 0.8740149456262588,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -24.820443616594577,
+        "W_net_mean": 12.254445300102233,
+        "eta_mean": 0.8736465394496917,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -7.878251126834312,
+        "W_net_mean": 12.259123438596726,
+        "eta_mean": 0.8935215872526169,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -13.599189376831047,
+        "W_net_mean": 12.256067686080932,
+        "eta_mean": 0.8867758584022521,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -10.15913947650363,
+        "W_net_mean": 12.264298524856567,
+        "eta_mean": 0.890981302857399,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -13.35283306326184,
+        "W_net_mean": 12.257924374341965,
+        "eta_mean": 0.887106596827507,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -21.225470008168895,
+        "W_net_mean": 12.255004774332047,
+        "eta_mean": 0.8778537297248841,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -11.135200330189278,
+        "W_net_mean": 12.252368283271789,
+        "eta_mean": 0.8895641928911209,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -11.217670450891749,
+        "W_net_mean": 12.258564268350602,
+        "eta_mean": 0.8896125507354736,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -13.655086728504712,
+        "W_net_mean": 12.26316154718399,
+        "eta_mean": 0.8868761682510375,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -9.562116949898838,
+        "W_net_mean": 12.259583554267884,
+        "eta_mean": 0.8915678131580352,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -20.977355834415967,
+        "W_net_mean": 12.255041577816009,
+        "eta_mean": 0.8781440550088883,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -29.50762628146579,
+        "W_net_mean": 12.250674340724945,
+        "eta_mean": 0.868090170621872,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -2.735373592376697,
+        "W_net_mean": 12.261493246555329,
+        "eta_mean": 0.8995769065618515,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -22.741318358693785,
+        "W_net_mean": 12.254044171571731,
+        "eta_mean": 0.8760628259181976,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -23.556020528929555,
+        "W_net_mean": 12.260519322156906,
+        "eta_mean": 0.87526342689991,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -16.985126151357367,
+        "W_net_mean": 12.26397478222847,
+        "eta_mean": 0.8830100977420807,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -11.452292537689196,
+        "W_net_mean": 12.263880269527435,
+        "eta_mean": 0.8894628649950027,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -11.043242239952068,
+        "W_net_mean": 12.257091284990311,
+        "eta_mean": 0.8897816807031631,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -23.689604878425577,
+        "W_net_mean": 12.252989345788956,
+        "eta_mean": 0.874931879043579,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -10.901801000322603,
+        "W_net_mean": 12.260502343177796,
+        "eta_mean": 0.8900262868404388,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -17.596577657972052,
+        "W_net_mean": 12.251867690086364,
+        "eta_mean": 0.8820142388343811,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -9.928344297409042,
+        "W_net_mean": 12.260695984363556,
+        "eta_mean": 0.8911665046215057,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -16.95051366942268,
+        "W_net_mean": 12.254894649982452,
+        "eta_mean": 0.8828386092185974,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -14.206920201437804,
+        "W_net_mean": 12.259255836009979,
+        "eta_mean": 0.8861412292718888,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -17.061397140366672,
+        "W_net_mean": 12.259638937711715,
+        "eta_mean": 0.8828199452161789,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -23.06815168857571,
+        "W_net_mean": 12.260235975980759,
+        "eta_mean": 0.8758259958028793,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -28.684223743847436,
+        "W_net_mean": 12.255021096467972,
+        "eta_mean": 0.8691522312164307,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -6.669960185459668,
+        "W_net_mean": 12.258045332431793,
+        "eta_mean": 0.8949061042070389,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -14.974470881053366,
+        "W_net_mean": 12.262922494411468,
+        "eta_mean": 0.8853313088417053,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -10.320105348314542,
+        "W_net_mean": 12.262590193748474,
+        "eta_mean": 0.8907536482810974,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -19.341774807657497,
+        "W_net_mean": 12.262317255735397,
+        "eta_mean": 0.8802219986915588,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -1.0718196017401433,
+        "W_net_mean": 12.260294378995896,
+        "eta_mean": 0.9014897459745407,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -31.7671024935586,
+        "W_net_mean": 12.257094588279724,
+        "eta_mean": 0.8656039208173751,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -15.658193281718654,
+        "W_net_mean": 12.260491991043091,
+        "eta_mean": 0.8844769209623337,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -9.96957430158341,
+        "W_net_mean": 12.262572667598725,
+        "eta_mean": 0.8911621922254562,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -6.592536333629051,
+        "W_net_mean": 12.258610436916351,
+        "eta_mean": 0.8950096178054809,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -20.059056006159093,
+        "W_net_mean": 12.258986195325852,
+        "eta_mean": 0.8793074458837509,
+        "episode_len": 200,
+        "unsafe_termination": false
+      },
+      {
+        "total_reward": -10.159836585181088,
+        "W_net_mean": 12.260938904285432,
+        "eta_mean": 0.8909020984172821,
+        "episode_len": 200,
+        "unsafe_termination": false
+      }
+    ]
+  }
+}

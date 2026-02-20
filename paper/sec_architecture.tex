@@ -4,17 +4,36 @@
 
 \begin{figure}[t]
   \centering
+  \includegraphics[width=0.95\linewidth]{figures/system_architecture.png}
+  \caption{%
+    Three-layer sCO2RL system architecture.
+    The physics simulation layer (FMU exported from OpenModelica with ThermoPower
+    and CoolProp) provides the ground-truth environment.
+    The Gymnasium interface layer wraps the FMU (\texttt{SCO2FMUEnv}) and the
+    MLP step-predictor surrogate (\texttt{MLPSurrogateEnv}, 1{,}024-way
+    GPU-vectorised) for RL training.
+    The FNO surrogate (NVIDIA PhysicsNeMo, $R^2 = 1.000$) is trained for
+    physics-operator validation but is not used for step-by-step RL due to
+    its non-causal sequence-to-sequence architecture.
+    Training pipeline throughputs: CPU FMU ${\approx}530$~steps/s;
+    GPU MLP ${\approx}250{,}000$~steps/s.%
+  }
+  \label{fig:system_architecture}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
   \includegraphics[width=0.90\linewidth]{figures/cycle_diagram.png}
   \caption{%
     Simple recuperated sCO$_2$ Brayton cycle schematic.
     The clockwise flow path connects: heat source (EAF/BOF exhaust,
-    200--1200\textdegree{}C) $\to$ turbine [2] $\to$ recuperator hot side [4,5]
+    200--1200\textdegree{}C) $\to$ turbine [3] $\to$ recuperator hot side [4,5]
     $\to$ pre-cooler [5$\to$1] $\to$ main compressor [1$\to$2] $\to$ recuperator
     cold side [2$\to$3] $\to$ heat source.
-    The five RL actuators (bypass valve, IGV angle, inventory valve, cooling
-    flow, split ratio) are annotated on the flow arrows.
-    Critical safety constraint: compressor inlet must remain above 33\textdegree{}C
-    (1.9\textdegree{}C above the CO$_2$ critical point).%
+    The four RL actuators (bypass valve, IGV angle, inventory valve, cooling
+    flow) are annotated on the flow arrows.
+    Critical safety constraint: compressor inlet must remain above 32.2\textdegree{}C
+    (1.1\textdegree{}C above the CO$_2$ critical point).%
   }
   \label{fig:cycle_schematic}
 \end{figure}
@@ -37,7 +56,8 @@
 \subsection{Physics Simulation Layer}
 
 The base environment is a \emph{simple recuperated} sCO$_2$ Brayton cycle
-(Figures~\ref{fig:cycle_schematic} and~\ref{fig:cycle_ts})
+(Figures~\ref{fig:cycle_schematic} and~\ref{fig:cycle_ts};
+overall architecture in Figure~\ref{fig:system_architecture})
 modelled in OpenModelica (OM~1.23) using ThermoPower~\cite{thermopower} and
 ExternalMedia~\cite{externalmedia} with the CoolProp Span--Wagner
 CO$_2$ EOS~\cite{coolprop}.
@@ -47,12 +67,14 @@ The simple recuperated topology was chosen over recompression for the WHR
 application because it extracts heat more uniformly across the flue gas
 temperature range, maximising recovery from the variable EAF exhaust profile.
 
-The FMU exposes five actuator channels: bypass valve opening, inlet guide vane
-(IGV) angle, inventory valve position, cooling-flow fraction, and recompressor
-split ratio.
-Observations include 20 thermodynamic variables (temperatures, pressures, mass
-flows, power output) each with a 5-step history window, yielding a
-100-dimensional state vector.
+The FMU exposes \textbf{four actuator channels}: bypass valve opening,
+inlet guide vane (IGV) angle, inventory valve position, and cooling-flow
+fraction. All four are normalised to $[-1, 1]$ and rate-limited to prevent
+actuator damage.
+Observations comprise \textbf{14 thermodynamic state variables} covering
+temperatures (compressor inlet/outlet, turbine inlet, recuperator, heat source),
+pressures (high-side, low-side), mass flow rates, power output
+(turbine, compressor, net), thermal efficiency, and heat input rate.
 
 Five critical engineering constraints are enforced:
 \begin{itemize}
@@ -75,12 +97,13 @@ SI units (watts) to engineering units (MW) \emph{before} the reward
 function observes them.
 Key components:
 \begin{itemize}
-  \item \textbf{Observation}: 20 variables $\times$ 5 history steps
-        $= 100$-dimensional input vector.
-  \item \textbf{Action}: 5-dimensional continuous in $[-1,1]$, decoded to
+  \item \textbf{Observation}: 14 thermodynamic state variables, normalised
+        to $[-1, 1]$ via per-variable min-max bounds.
+  \item \textbf{Action}: 4-dimensional continuous in $[-1,1]$, decoded to
         physical ranges and rate-limited to prevent actuator damage.
-  \item \textbf{Normalisation}: SB3 \texttt{VecNormalize} with running
-        mean/variance across all 8~parallel environments;
+  \item \textbf{Normalisation}: Per-variable min-max bounds with running
+        mean/variance via SB3 \texttt{VecNormalize} across all
+        8~parallel environments;
         must be persisted alongside policy weights at every checkpoint
         (see Section~\ref{sec:bugs}).
   \item \textbf{Reward}: $r = r_{\text{tracking}} + r_{\text{smooth}} - r_{\text{constraint}}$,
@@ -91,7 +114,7 @@ Key components:
 
 \subsection{RL Training}
 
-PPO~\cite{schulman2017} is implemented via Stable-Baselines3~\cite{sb3} with
+PPO~\cite{schulman2017} is implemented with
 Lagrangian constraint multipliers~\cite{achiam2017cpo} attached as trainable
 parameters $\lambda_c \geq 0$ updated online from per-step violation signals.
 The actor and critic share an MLP backbone with hidden layers $[256, 256, 128]$
@@ -100,12 +123,13 @@ Key hyperparameters: clip $\varepsilon = 0.2$, GAE $\lambda_{\text{GAE}} = 0.95$
 $\gamma = 0.99$, learning rate $3\times10^{-4}$ (linear decay),
 mini-batch 256, epochs 10, rollout steps $n_{\text{steps}} = 2{,}048$.
 
-Training uses two parallel paths:
+Training uses two parallel paths (Figure~\ref{fig:system_architecture}):
 \begin{enumerate}
   \item \textbf{FMU path}: SB3 PPO + \texttt{SubprocVecEnv}
         (8 parallel FMU instances on CPU); throughput ${\approx}530$~steps/s.
-  \item \textbf{Surrogate path}: SKRL PPO + 1{,}024-way GPU vectorisation
-        backed by an FNO surrogate; throughput ${\approx}10^6$~steps/s.
+  \item \textbf{MLP surrogate path}: Standalone PyTorch PPO + 1{,}024-way
+        GPU vectorisation backed by the MLP step predictor;
+        throughput ${\approx}250{,}000$~steps/s ($470\times$ faster).
 \end{enumerate}
 
 \subsection{Curriculum Learning}
@@ -116,34 +140,80 @@ recovery with rapid load rejection).
 Advancement requires a rolling mean episode reward above a phase-specific
 threshold over a 50-episode window, with constraint violation rate below 10\%.
 
-\subsection{Surrogate Model: NVIDIA PhysicsNeMo FNO}
+\subsection{Surrogate Models}
+\label{sec:surrogates}
+
+Two surrogate models are developed and evaluated in this work.
+
+\subsubsection{MLP Step Predictor}
+\label{sec:mlp_surrogate}
+
+The primary surrogate for RL training is a \emph{residual MLP step predictor}
+that maps a single $(s_t, a_t)$ pair to the next state $s_{t+1}$:
+\begin{equation}
+  \hat{s}_{t+1} = s_t + \text{MLP}([s_t,\, a_t])
+\end{equation}
+Architecture: 4~hidden layers of 512 units each with SiLU activations,
+residual skip connection from input to output, orthogonal output layer
+initialisation (gain $= 0.01$).
+Input dimension: 18 (14 state + 4 action); output: 14 state.
+The residual formulation biases the network towards learning small corrections
+rather than full absolute state values, which reduces the effective learning
+task and improves data efficiency.
+
+Training uses 55{,}000{,}000 $(s, a, s')$ transition tuples extracted from
+the 76{,}600 LHS FMU trajectories.
+The 90/10 train/validation split yields training and validation losses of
+$5{\times}10^{-6}$ per unit step after 20 epochs (8.5~minutes on DGX Spark GPU).
+All inputs are min-max normalised to $[-1, 1]$ using training-set statistics.
+
+\subsubsection{FNO Physics Operator}
+\label{sec:fno_surrogate}
 
 The Fourier Neural Operator~\cite{fno2021} is implemented using
 \textbf{NVIDIA PhysicsNeMo}~\cite{physicsnemo2023} (\texttt{nvidia-physicsnemo}
 package, import path \texttt{physicsnemo.models.fno.FNO}), a physics-informed
-AI framework from NVIDIA Research providing GPU-optimised operator learning
-implementations.
+AI framework from NVIDIA Research.
 
-The surrogate maps a sequence of $(s_t, a_t)$ pairs to a sequence of
-$(s_{t+1})$ predictions in normalised coordinates:
+The FNO maps a full trajectory sequence of $(s_t, a_t)$ pairs to the
+corresponding sequence of predicted next states:
 \begin{equation}
   \hat{s}_{1:T} = \text{FNO}(\,[s_0, a_0],\, [s_1, a_1],\, \ldots,\, [s_{T-1}, a_{T-1}]\,)
 \end{equation}
 Architecture: $d_{\text{in}} = 18$ (14 obs + 4 actions), $d_{\text{out}} = 14$,
 spectral modes = 64, channel width = 128, 4~Fourier layers, GELU activation,
 546{,}190 parameters.
-Per-variable z-score normalisation is applied before training, using training-set
-statistics to handle the mixed physical scales (temperatures in \textdegree{}C,
-pressures in MPa, powers in MW).
+The FNO achieves $R^2 = 1.000$ and normalised RMSE $= 0.0010$ on held-out
+trajectories, confirming physics-faithful trajectory reconstruction.
 
-The training dataset comprises 76{,}600 strictly unique Latin Hypercube-sampled
-FMU trajectories (3.98~GB, 720~steps each), collected with the corrected
-\texttt{reset()} LHS application logic.
-The 80/10/10 train/validation/test split yields 61{,}280 training and
-7{,}660 validation trajectories.
-After surrogate training on the DGX Spark GB10 GPU (200~epochs, early-stop
-patience 20), 500{,}000 fine-tuning steps on the live FMU correct any residual
-surrogate bias before surrogate-path policy deployment.
+\textbf{FNO incompatibility with step-by-step RL.}
+Despite excellent trajectory reconstruction fidelity, the FNO cannot be used
+for step-by-step RL without architectural modifications.
+The FNO is a \emph{non-causal} model trained on full sequences: it applies
+global Fourier convolutions over the entire input trajectory and is tuned
+to trajectory-length spectral modes ($T = 720$ steps, modes $= 64$).
+When queried with a single step (as required by RL), the model receives
+an in-distribution input mismatch causing spectral aliasing;
+outputs are garbage despite $R^2 = 1.000$ on full trajectories.
+The MLP step predictor resolves this by design: it is explicitly trained and
+evaluated on single-step $(s, a) \to s'$ prediction.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{figures/training_pipeline.png}
+  \caption{%
+    End-to-end training pipeline.
+    FMU simulation produces 76{,}600 Latin Hypercube-sampled trajectories
+    (55{,}000{,}000 $(s, a, s')$ transitions, 3.98~GB).
+    The MLP step predictor (residual, 4~layers, 512~hidden) is trained in
+    8.5~minutes (val\_loss~$= 5{\times}10^{-6}$).
+    PPO training on 1{,}024 GPU-vectorised MLP environments completes in
+    23~minutes at 250{,}000~steps/s, yielding the deployment policy.
+    The FNO path (NVIDIA PhysicsNeMo, $R^2 = 1.000$) is used for surrogate
+    validation only; its non-causal architecture precludes direct RL use.%
+  }
+  \label{fig:training_pipeline}
+\end{figure}
 
 \subsection{Deployment Path}
 
