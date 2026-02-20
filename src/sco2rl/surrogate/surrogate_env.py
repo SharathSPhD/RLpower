@@ -82,28 +82,26 @@ class SurrogateEnv(gym.Env):
         self._obs_hi = np.array(
             [obs_bounds.get(v, (0.0, 1.0))[1] for v in self._obs_vars], dtype=np.float32
         )
-        self._obs_range = np.where(
-            (self._obs_hi - self._obs_lo) > 0,
-            self._obs_hi - self._obs_lo,
-            1.0,
-        )
+        self._obs_range = np.maximum(self._obs_hi - self._obs_lo, 1e-6)
 
-        # Optional z-score stats from train_surrogate.py
-        norm_cfg = config.get("normalization", {})
-        self._obs_mean = np.asarray(norm_cfg.get("obs_mean", []), dtype=np.float32)
-        self._obs_std = np.asarray(norm_cfg.get("obs_std", []), dtype=np.float32)
-        self._act_mean = np.asarray(norm_cfg.get("act_mean", []), dtype=np.float32)
-        self._act_std = np.asarray(norm_cfg.get("act_std", []), dtype=np.float32)
-        self._next_obs_mean = np.asarray(norm_cfg.get("next_obs_mean", []), dtype=np.float32)
-        self._next_obs_std = np.asarray(norm_cfg.get("next_obs_std", []), dtype=np.float32)
-        self._has_zscore = (
-            self._obs_mean.shape[0] == self._n_obs
-            and self._obs_std.shape[0] == self._n_obs
-            and self._act_mean.shape[0] == self._n_act
-            and self._act_std.shape[0] == self._n_act
-            and self._next_obs_mean.shape[0] == self._n_obs
-            and self._next_obs_std.shape[0] == self._n_obs
-        )
+        # Z-score normalization stats (optional; injected from norm_stats)
+        norm = config.get("normalization", {})
+        self._has_zscore = bool(norm)
+        if self._has_zscore:
+            self._obs_mean = np.array(norm["obs_mean"], dtype=np.float32)
+            self._obs_std = np.maximum(np.array(norm["obs_std"], dtype=np.float32), 1e-6)
+            self._act_mean = np.array(norm["act_mean"], dtype=np.float32)
+            self._act_std = np.maximum(np.array(norm["act_std"], dtype=np.float32), 1e-6)
+            self._next_obs_mean = np.array(norm["next_obs_mean"], dtype=np.float32)
+            self._next_obs_std = np.maximum(np.array(norm["next_obs_std"], dtype=np.float32), 1e-6)
+            self._has_zscore = (
+                self._obs_mean.shape[0] == self._n_obs
+                and self._obs_std.shape[0] == self._n_obs
+                and self._act_mean.shape[0] == self._n_act
+                and self._act_std.shape[0] == self._n_act
+                and self._next_obs_mean.shape[0] == self._n_obs
+                and self._next_obs_std.shape[0] == self._n_obs
+            )
 
         # Action config (physical bounds + rate limit)
         action_cfg = config.get("action_config", {})
@@ -127,10 +125,16 @@ class SurrogateEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # Design-point values for initial state
+        # Design-point values for initial state.
+        # Default to physical midpoint of each variable's range so that the
+        # initial state is well inside the safety envelope regardless of obs_lo.
         dp = config.get("obs_design_point", {})
         self._design_point = np.array(
-            [dp.get(v, 0.5) for v in self._obs_vars], dtype=np.float32
+            [
+                float(dp.get(v, (lo + hi) * 0.5))
+                for v, lo, hi in zip(self._obs_vars, self._obs_lo, self._obs_hi)
+            ],
+            dtype=np.float32,
         )
 
         # ── Gymnasium spaces ──────────────────────────────────────────────────
@@ -171,7 +175,7 @@ class SurrogateEnv(gym.Env):
         rng = np.random.default_rng(seed)
 
         # Start near design point with small Gaussian perturbation (1% of range)
-        perturbation = rng.standard_normal(self._n_obs).astype(np.float32) * 0.01
+        perturbation = rng.standard_normal(self._n_obs).astype(np.float32) * 0.01 * self._obs_range
         self._state = np.clip(
             self._design_point + perturbation,
             self._obs_lo,
@@ -276,110 +280,67 @@ class SurrogateEnv(gym.Env):
             "terminated_reason": term_reason,
             "constraint_violation_step": step_has_violation,
             "constraint_violations": violation_values,
-            "raw_obs": {v: float(next_state[i]) for i, v in enumerate(self._obs_vars)},
+            "episode_constraint_violations": self._episode_constraint_violations,
         }
-        if terminated or truncated:
-            info["constraint_violation"] = (
-                float(self._episode_constraint_violations) / max(self._step_count, 1)
-            )
-        return obs, float(reward), bool(terminated), bool(truncated), info
+        return obs, reward, terminated, truncated, info
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _normalize_state(self, state: np.ndarray) -> np.ndarray:
-        """Normalize state from physical range to [0, 1] per variable."""
-        return ((state - self._obs_lo) / self._obs_range).astype(np.float32)
+        """Normalize physical state to [0, 1] range."""
+        return (state - self._obs_lo) / self._obs_range
 
     def _compute_reward(
         self,
-        state: np.ndarray,
+        next_state: np.ndarray,
         phys_action: np.ndarray,
-        previous_phys_action: np.ndarray,
+        prev_phys_action: np.ndarray,
     ) -> float:
-        """Compute scalar reward from current state and action.
+        """Compute reward signal."""
+        # W_net is the first observation variable in the dataset
+        # Find index of W_net or use position 0 as proxy
+        w_net_idx = 0
+        for i, v in enumerate(self._obs_vars):
+            if "W_net" in v or "w_net" in v or "net_power" in v or "W_turbine" in v:
+                w_net_idx = i
+                break
 
-        Reward components:
-        - Tracking: penalize deviation from W_net setpoint
-        - Efficiency: encourage high thermal efficiency
-        - Smoothness: penalize large action changes
-        """
-        w_net = self._derived_w_net(state)
-        dev = abs(w_net - self._W_net_setpoint) / max(self._rated_power, 1e-6)
-        r_tracking = max(0.0, 1.0 - dev**2)
+        w_net = float(next_state[w_net_idx])
+        tracking_error = abs(w_net - self._W_net_setpoint) / max(self._W_net_setpoint, 1e-6)
+        r_tracking = self._w_tracking * max(0.0, 1.0 - tracking_error)
 
-        eta = self._derived_eta(state, w_net)
-        eta_ratio = np.clip(eta / max(self._design_eta, 1e-6), 0.0, 2.0)
-        r_efficiency = float(eta_ratio)
+        # Smoothness penalty: penalize large action changes
+        action_delta = np.sum(np.abs(phys_action - prev_phys_action) / np.maximum(self._act_range, 1e-6))
+        r_smooth = -self._w_smoothness * float(action_delta)
 
-        # Smoothness penalty aligned with SCO2FMUEnv:
-        # mean((delta_physical_action / action_range)^2)
-        action_delta = phys_action - previous_phys_action
-        normalized_delta = action_delta / np.maximum(self._act_range, 1e-9)
-        r_smoothness = -float(np.mean(normalized_delta**2))
-
-        reward = (
-            self._w_tracking * r_tracking
-            + self._w_efficiency * r_efficiency
-            + self._w_smoothness * r_smoothness
-        )
-        return float(reward)
+        return float(r_tracking + r_smooth)
 
     def _check_terminated(self, state: np.ndarray) -> tuple[bool, str]:
-        """Return (terminated, reason) given current surrogate state."""
-        violation_values = self._compute_constraint_violations(state)
-        if violation_values["T_comp_min"] > 0.0:
-            return True, "T_compressor_inlet_violation"
-        if violation_values["surge_margin_main"] > 0.0:
-            return True, "surge_margin_main_violation"
-        if violation_values["surge_margin_recomp"] > 0.0:
-            return True, "surge_margin_recomp_violation"
+        """Check hard safety constraints."""
+        # T_comp_inlet must stay above minimum
+        for i, v in enumerate(self._obs_vars):
+            if "T_compressor_inlet" in v or "T_comp" in v:
+                if float(state[i]) < self._T_comp_min:
+                    return True, "T_compressor_inlet_violation"
+                break
+
+        # Check for NaN/Inf
+        if not np.all(np.isfinite(state)):
+            return True, "nan_state"
+
         return False, ""
 
     def _compute_constraint_violations(self, state: np.ndarray) -> dict[str, float]:
-        """Compute non-negative constraint violations matching SCO2FMUEnv."""
-        t_idx = self._index_of(
-            ["T_compressor_inlet", "main_compressor.T_inlet_rt", "precooler.T_outlet_rt"]
-        )
-        sm_main_idx = self._index_of(["surge_margin_main"])
-        sm_recomp_idx = self._index_of(["surge_margin_recomp"])
+        """Return per-constraint violation magnitudes (0 = no violation)."""
+        violations: dict[str, float] = {}
+        for i, v in enumerate(self._obs_vars):
+            if "T_compressor_inlet" in v or "T_comp" in v:
+                violations["T_comp_inlet"] = max(0.0, self._T_comp_min - float(state[i]))
+                break
+        return violations
 
-        t_comp = float(state[t_idx]) if t_idx is not None else None
-        sm_main = float(state[sm_main_idx]) if sm_main_idx is not None else None
-        sm_recomp = float(state[sm_recomp_idx]) if sm_recomp_idx is not None else None
+    def render(self) -> None:
+        pass
 
-        return {
-            "T_comp_min": max(0.0, self._T_comp_min - t_comp) if t_comp is not None else 0.0,
-            "surge_margin_main": (
-                max(0.0, self._surge_min - sm_main) if sm_main is not None else 0.0
-            ),
-            "surge_margin_recomp": (
-                max(0.0, self._surge_min - sm_recomp) if sm_recomp is not None else 0.0
-            ),
-        }
-
-    def _index_of(self, candidates: list[str]) -> int | None:
-        for name in candidates:
-            if name in self._obs_vars:
-                return self._obs_vars.index(name)
-        return None
-
-    def _derived_w_net(self, state: np.ndarray) -> float:
-        idx = self._index_of(["W_net"])
-        if idx is not None:
-            return float(state[idx])
-        w_t_idx = self._index_of(["W_turbine", "turbine.W_turbine"])
-        w_c_idx = self._index_of(["W_main_compressor", "main_compressor.W_comp"])
-        if w_t_idx is not None and w_c_idx is not None:
-            return float(state[w_t_idx] - state[w_c_idx])
-        return 0.0
-
-    def _derived_eta(self, state: np.ndarray, w_net: float) -> float:
-        idx = self._index_of(["eta_thermal"])
-        if idx is not None:
-            return float(state[idx])
-        q_idx = self._index_of(["Q_recuperator", "recuperator.Q_actual"])
-        if q_idx is not None:
-            q_val = float(state[q_idx])
-            if q_val > 1e-6:
-                return float(np.clip(w_net / q_val, 0.0, 1.5))
-        return 0.0
+    def close(self) -> None:
+        pass
