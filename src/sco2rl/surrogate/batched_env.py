@@ -77,6 +77,12 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
         self._obs_lo = torch.tensor(obs_lo, device=self._device)
         self._obs_hi = torch.tensor(obs_hi, device=self._device)
         self._obs_range = torch.tensor(obs_range, device=self._device)
+        # Min-max normalization for history-stacked observations returned to SKRL.
+        # Tiled once history_steps is known (set in config section below).
+        _hist_lo_np = np.tile(obs_lo, self._history_steps)
+        _hist_range_np = np.tile(obs_range, self._history_steps)
+        self._hist_lo = torch.tensor(_hist_lo_np, dtype=torch.float32, device=self._device)
+        self._hist_range = torch.tensor(_hist_range_np, dtype=torch.float32, device=self._device)
 
         norm_cfg = config.get("normalization", {})
         obs_mean = np.asarray(norm_cfg.get("obs_mean", []), dtype=np.float32)
@@ -162,6 +168,18 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
         self.observation_space = batch_space(single_observation_space, self._n_envs)
         self.action_space = batch_space(single_action_space, self._n_envs)
 
+        # Rolling (state, action) context buffer for FNO input.
+        # The FNO was trained on full T=719 sequence data; for one-step prediction
+        # we maintain T_ctx timesteps of history and feed that instead of a
+        # constant repeated state. This keeps the input in-distribution.
+        from sco2rl.surrogate.fno_model import SCO2SurrogateFNO  # avoid circular
+        _modes = getattr(model, "_modes", 16) if hasattr(model, "_modes") else 16
+        self._fno_T_ctx = max(_modes * 2, 32)
+        self._input_buffer = torch.zeros(
+            (self._n_envs, self._n_obs + self._n_act, self._fno_T_ctx),
+            device=self._device
+        )
+
         # Internal vectorized state
         self._state = torch.zeros((self._n_envs, self._n_obs), device=self._device)
         self._history = torch.zeros((self._n_envs, single_obs_dim), device=self._device)
@@ -177,7 +195,7 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
     def reset(self, *, seed: int | list[int] | None = None, options: dict[str, Any] | None = None):
         del options
         self._reset_indices(torch.arange(self._n_envs, device=self._device), seed=seed)
-        obs = self._history.detach().cpu().numpy().astype(np.float32)
+        obs = self._normalized_history().detach().cpu().numpy().astype(np.float32)
         info = {"step": np.zeros((self._n_envs,), dtype=np.int32)}
         return obs, info
 
@@ -205,8 +223,14 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
             state_model = (self._state - self._obs_lo) / self._obs_range
             act_model = action_t
 
+        # Update rolling (state, action) buffer: shift left and append current frame
+        x_cur = torch.cat([state_model, act_model], dim=-1)  # (N, C=18)
+        self._input_buffer = torch.roll(self._input_buffer, shifts=-1, dims=2)
+        self._input_buffer[:, :, -1] = x_cur  # (N, C, T_ctx)
+
         with torch.no_grad():
-            next_state_model = self._model.predict_next_state(state_model, act_model)
+            fno_out = self._model.fno(self._input_buffer)  # (N, output_dim, T_ctx)
+            next_state_model = fno_out[:, :, -1]           # last timestep prediction
 
         if self._has_zscore:
             next_state = next_state_model * self._next_obs_std + self._next_obs_mean
@@ -243,7 +267,7 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
         self._state = next_state
         self._prev_phys_action = phys_action
 
-        obs = self._history.detach().cpu().numpy().astype(np.float32)
+        obs = self._normalized_history().detach().cpu().numpy().astype(np.float32)
         rewards_np = reward.detach().cpu().numpy().astype(np.float32)
         terminated_np = terminated.detach().cpu().numpy().astype(bool)
         truncated_np = truncated.detach().cpu().numpy().astype(bool)
@@ -289,7 +313,7 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
             info["final_observation"] = final_obs
             info["final_info"] = final_info
             self._reset_indices(torch.as_tensor(done_idx, device=self._device), seed=None)
-            obs = self._history.detach().cpu().numpy().astype(np.float32)
+            obs = self._normalized_history().detach().cpu().numpy().astype(np.float32)
 
         return obs, rewards_np, terminated_np, truncated_np, info
 
@@ -331,6 +355,22 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
         self._prev_phys_action[indices] = self._act_phys_min
         self._step_count[indices] = 0
         self._episode_constraint_violations[indices] = 0
+
+        # Initialize FNO rolling buffer with z-score normalized (state, mid_action)
+        # repeated T_ctx times to give the FNO a "warm-up" context from reset state.
+        if self._has_zscore:
+            s_norm = (init_t - self._obs_mean) / self._obs_std  # (k, n_obs)
+            # mid_action normalized
+            mid_act_np = mid_action.detach().cpu().numpy()
+            mid_act_t = torch.tensor(mid_act_np, dtype=torch.float32, device=self._device)
+            a_norm = (mid_act_t - self._act_mean) / self._act_std
+            a_norm = a_norm.unsqueeze(0).expand(len(idx_np), -1)
+        else:
+            s_norm = (init_t - self._obs_lo) / self._obs_range
+            a_norm = torch.zeros((len(idx_np), self._n_act), device=self._device)
+        x0 = torch.cat([s_norm, a_norm], dim=-1)  # (k, n_obs+n_act)
+        x0_exp = x0.unsqueeze(-1).expand(-1, -1, self._fno_T_ctx)  # (k, C, T_ctx)
+        self._input_buffer[indices] = x0_exp
 
     def _compute_reward(
         self,
@@ -393,6 +433,10 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
             "surge_margin_main": torch.clamp(self._surge_min - sm_main, min=0.0) if sm_main is not None else zeros,
             "surge_margin_recomp": torch.clamp(self._surge_min - sm_recomp, min=0.0) if sm_recomp is not None else zeros,
         }
+
+    def _normalized_history(self) -> torch.Tensor:
+        """Return history buffer normalized to [-1, 1] via obs_bounds min-max."""
+        return 2.0 * (self._history - self._hist_lo) / self._hist_range - 1.0
 
     def _index_of(self, candidates: list[str]) -> int | None:
         for name in candidates:

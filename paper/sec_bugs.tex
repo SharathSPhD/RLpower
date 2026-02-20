@@ -5,7 +5,7 @@
 The most revealing aspect of this project is how five distinct software
 engineering defects — none of them algorithmic — collectively prevented the
 agent from demonstrating capability that it already possessed.
-We document them in detail as they represent failure modes likely to recur
+These defects are documented in detail as they represent failure modes likely to recur
 in any RL-on-FMU project.
 
 \subsection{Bug 1: VecNormalize Persistence Failure}
@@ -170,25 +170,31 @@ The closest related system, Zhu et al.~\cite{zhu2024fno}, applies FNO-based
 MPC to sCO$_2$ dynamics but does not include an open-source Gym environment,
 a curriculum, or a deployment artefact.
 
-sCO2RL is, to our knowledge, the first publicly available framework
+sCO2RL is, to the authors' knowledge, the first publicly available framework
 combining FMU-faithful sCO$_2$ simulation, structured curriculum RL,
 Lagrangian safe constraints, GPU-surrogate training, and sub-millisecond
 TensorRT deployment.
 
 \subsection{Surrogate Fidelity Failure Analysis}
 
-The FNO surrogate achieved overall $R^2 = -77.15$, indicating it
-is worse than a mean predictor.
-Two contributing factors:
-(i)~\emph{Dataset quality}: the 75{,}000-sample dataset was created by
-upsampling a smaller collection; the FNO memorised repeating patterns
-rather than learning the underlying dynamics.
-(ii)~\emph{Distribution mismatch}: uniform LHS sampling does not
-respect the stiffness of the sCO$_2$ equations near the critical region;
-trajectories crossing critical-point isotherms need overrepresentation.
+The initial FNO surrogate (V1, trained on a degenerate 75{,}000-trajectory
+dataset) achieved overall $R^2 = -77.15$, indicating performance worse than
+a constant-mean predictor.
+Two contributing factors were identified:
+(i)~\emph{Dataset quality}: the 75{,}000-sample dataset contained only
+2{,}100 unique initial conditions due to a bug in the \texttt{reset()} LHS
+application (the options dictionary was accepted but not applied to the FMU);
+the FNO memorised repeating patterns rather than learning the underlying dynamics.
+(ii)~\emph{Distribution mismatch}: the degenerate dataset lacked coverage of
+the critical-region operating envelope.
 
-Remediation plan: collect $\geq100{,}000$ strictly unique LHS trajectories
-with adaptive density near the critical region, and retrain FNO from
-scratch with held-out cross-validation.
+After diagnosing and fixing the \texttt{reset()} LHS application,
+76{,}600 genuinely unique trajectories were collected and the PhysicsNeMo FNO
+was retrained (V2).
+The remediated V2 FNO achieved $R^2 = 1.0000$ and normalised RMSE $= 0.0010$,
+confirming that data quality entirely dominates surrogate performance
+independent of model architecture.
+A detailed per-variable fidelity breakdown for V1 is provided in
+Appendix~\ref{app:fno_v1_detail}.
 
 %% ---------------------------------------------------------------------------

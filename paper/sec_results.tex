@@ -2,6 +2,8 @@
 \label{sec:results}
 %% ---------------------------------------------------------------------------
 
+This section presents the experimental evaluation of the sCO2RL framework
+across both the FMU-direct and MLP surrogate training paths.
 All results below use the corrected training infrastructure with all five
 engineering defects resolved (Section~\ref{sec:bugs}).
 Training hardware: NVIDIA DGX Spark (GB10 Grace Blackwell, 128~GB unified
@@ -20,7 +22,7 @@ Phase~0 bottleneck that had trapped the previous (buggy) run for 2.8M~steps.
 
 \begin{table}[h]
 \centering
-\caption{Curriculum advancement timeline — corrected 5{,}013{,}504-step
+\caption{Curriculum advancement timeline --- corrected 5{,}013{,}504-step
          training run. Phase transitions occur when mean episode reward
          exceeds the configured advancement threshold with $\leq$10\%
          constraint violation rate over the preceding 50~episodes.}
@@ -41,14 +43,15 @@ After traversing Phases~0--5 in the first 229{,}376 steps, the remaining
 $4{,}784{,}128$ steps ($95.4\%$ of total) deepened specialisation in
 Phase~6, resulting in the curriculum imbalance that affects per-phase
 evaluation performance (discussed in Section~\ref{subsec:phase_results}).
+Figure~\ref{fig:training_curve} shows the training reward progression
+across the full 5M-step run.
 
-\begin{figure}[t]
+\begin{figure}[h]
   \centering
   \includegraphics[width=0.92\linewidth]{figures/training_curve.png}
   \caption{%
     PPO training reward curve (5{,}013{,}504-step run).
-    Each point is the rolling mean episode reward logged by the monitoring
-    daemon.
+    Each point is the rolling mean episode reward.
     Vertical dashed lines mark phase transitions.
     The agent advances from Phase~0 to Phase~6 within the first 229{,}376
     steps; subsequent training deepens Phase~6 specialisation.%
@@ -61,13 +64,12 @@ evaluation performance (discussed in Section~\ref{subsec:phase_results}).
 \label{subsec:phase_results}
 
 The final 5{,}013{,}504-step checkpoint is evaluated in a rigorous post-training
-protocol: \textbf{20~episodes per phase}, \textbf{7~phases},
-\textbf{140~total evaluation episodes}, using a
-\textbf{Ziegler--Nichols-tuned PID baseline} (four independent PID channels
+protocol: 20~episodes per phase, 7~phases, 140~total evaluation episodes,
+using a Ziegler--Nichols-tuned PID baseline (four independent PID channels
 with step-response-derived gains, derated by 0.4$\times$ for stability).
-PID channel assignments: bypass valve $\to$ turbine inlet temperature;
-IGV angle $\to$ compressor inlet temperature; cooling flow $\to$ precooler
-outlet temperature; inventory valve $\to$ high-side pressure.
+PID channel assignments are: bypass valve $\to$ turbine inlet temperature,
+IGV angle $\to$ compressor inlet temperature, cooling flow $\to$ precooler
+outlet temperature, and inventory valve $\to$ high-side pressure.
 
 Results are summarised in Table~\ref{tab:allphases_zn} and visualised in
 Figure~\ref{fig:phase_rewards}.
@@ -100,46 +102,39 @@ Phase & Scenario & RL reward & PID reward & $\Delta$ RL vs.\ PID & RL viol. \\
 \end{tabular}
 \end{table}
 
-\textbf{Phases~0--2: RL clearly superior.}
-The RL agent achieves statistically consistent improvements of 30--39\% over
-the Ziegler--Nichols PID baseline in the three scenarios emphasising
-steady-state optimisation and mild transients.
+In Phases~0--2, the RL agent achieves statistically consistent improvements
+of 30--39\% over the Ziegler--Nichols PID baseline in the three scenarios
+emphasising steady-state optimisation and mild transients.
 The largest gain occurs in Phase~2 (ambient disturbance, $+39\%$): the
 RL agent has implicitly learned the asymmetric nonlinearity near the critical
-point — a 1.5\textdegree{}C compressor inlet temperature drop demands 6\%
-more cooling power, while the same increase requires only 18\% less — and
+point --- a 1.5\textdegree{}C compressor inlet temperature drop demands 6\%
+more cooling power, while the same increase requires only 18\% less --- and
 exploits it predictively, whereas the fixed-gain PID responds reactively.
 
-\textbf{Phases~3--6: curriculum imbalance causes forgetting.}
-All four severe-transient phases show performance degradation relative to the
-ZN-PID baseline.
+In Phases~3--6, all four severe-transient phases show performance degradation
+relative to the ZN-PID baseline.
 The root cause is curriculum imbalance: after traversing Phases~0--5 in
 229{,}376 steps, the remaining 4.8M~steps ($95.4\%$ of total) were spent
 exclusively in Phase~6 (emergency turbine trip).
 This pattern is a well-documented failure mode of non-interleaved curriculum
-learning — commonly termed catastrophic forgetting~\cite{mccloskey1989} —
+learning --- commonly termed catastrophic forgetting~\cite{mccloskey1989} ---
 where deep fine-tuning on one task displaces representational capacity needed
 for earlier tasks.
-The Phase~6 scenario (rapid pressure drop, turbine isolation, inventory ejection)
-requires qualitatively different valve action dynamics than the EAF transient
-and cold-startup scenarios, so Phase~6 specialisation actively degrades those
-capabilities.
 
-\textbf{This is not a fundamental RL limitation.}
+This is not a fundamental RL limitation.
 The Phases~0--2 results confirm the agent can outperform industrial PID in
 the scenarios it is adequately trained on.
-Remediation for Phases~3--6 requires either (i)~rebalanced curriculum
-allocation with $>$10\% of steps per non-trivial phase, or
-(ii)~continual learning techniques (EWC~\cite{kirkpatrick2017ewc},
+Remediation for Phases~3--6 requires either rebalanced curriculum
+allocation with more than 10\% of steps per non-trivial phase, or
+continual learning techniques (EWC~\cite{kirkpatrick2017ewc},
 progressive networks~\cite{rusu2016progressive}) to prevent forgetting
 during Phase~6 deepening.
 
-\textbf{Zero safety violations across all 140 evaluation episodes.}
+Zero safety violations were recorded across all 140 evaluation episodes.
 The Lagrangian constraint mechanism successfully enforces
 $T_{\text{comp,in}} > T_{\text{crit}} + 1$\textdegree{}C
-(CO$_2$ critical point plus 1\textdegree{}C margin) throughout all episodes
-for both RL and PID policies, even for Phase~3--6 scenarios where reward
-performance degrades substantially.
+throughout all episodes for both RL and PID policies, even for Phase~3--6
+scenarios where reward performance degrades substantially.
 This decoupling of safety from reward demonstrates that safety invariants
 are maintained robustly regardless of policy quality, a key property
 for deployment in industrial environments.
@@ -151,8 +146,7 @@ for deployment in industrial environments.
     Mean episode reward per curriculum phase: RL (5{,}013{,}504-step policy,
     blue) vs.\ Ziegler--Nichols PID (orange). 20~evaluation episodes per phase.
     Phases~0--2 show consistent RL superiority (+30--39\%).
-    Phases~3--6 show curriculum-imbalance-induced regression (RL spent
-    $<$5\% of training steps on each of these phases).%
+    Phases~3--6 show curriculum-imbalance-induced regression.%
   }
   \label{fig:phase_rewards}
 \end{figure}
@@ -163,9 +157,7 @@ for deployment in industrial environments.
   \caption{%
     Percentage improvement of RL over Ziegler--Nichols PID per phase.
     Green: RL wins (+30--39\% on Phases~0--2).
-    Red: Curriculum limitation (Phases~3--6, each with $<$5\% of training steps).
-    Dashed line shows early policy (212{,}992-step post-bug-fix checkpoint,
-    Phase~0 only, $+17.5\%$ with manual PID baseline).%
+    Red: curriculum limitation (Phases~3--6, each with $<$5\% of training steps).%
   }
   \label{fig:phase_improvement}
 \end{figure}
@@ -213,16 +205,15 @@ with a 30\% interleave ratio: after each Phase~6 episode, 30\% of workers
 are redirected to a uniformly randomly selected Phase~0--5 episode.
 The in-training monitoring reward stabilised at 413.3 (similar to the 5M
 checkpoint's 412.7), suggesting apparent training stability.
-However, per-phase evaluation reveals catastrophic regression:
+However, per-phase evaluation reveals catastrophic regression
+(Table~\ref{tab:interleaved}): the interleaved policy underperforms both PID
+and the 5M baseline across most phases, including Phase~6 where it spent
+70\% of its supplementary steps.
 
 \begin{table}[h]
 \centering
 \caption{Per-phase comparison: 5M policy vs.\ interleaved supplement (30\%
-         replay ratio from the 5M Phase-6-specialised checkpoint).
-         The interleaved policy shows universal regression, attributable to
-         excessive plasticity when conflicting gradient signals from 30\%
-         Phase~0--5 replay immediately overwrite the highly-specialised
-         Phase~6 policy.}
+         replay ratio from the 5M Phase-6-specialised checkpoint).}
 \label{tab:interleaved}
 \begin{tabular}{clrrr}
 \toprule
@@ -239,28 +230,17 @@ Phase & Scenario & PID & RL 5M & RL Interleaved \\
 \end{tabular}
 \end{table}
 
-The interleaved policy underperforms both PID and the 5M baseline across
-most phases, including Phase~6 where it spent 70\% of its supplementary
-steps.
-\textbf{Diagnosis}: applying a 30\% replay ratio immediately to a Phase~6-%
-specialised policy induces excessive gradient interference.
+Applying a 30\% replay ratio immediately to a Phase~6-specialised policy
+induces excessive gradient interference.
 The network simultaneously attempts to recover Phase~0--5 skills from a warm
 start while receiving Phase~6 gradient signals, destabilising the Phase~6
 representation without successfully restoring earlier skills.
-The in-training metric (413.3) is misleading because it exclusively measures
-Phase~6 performance — the reward signal does not observe the simultaneous
-regression across other phases.
-
-\textbf{Recommended remediation}: adopt a cosine-annealed replay schedule
+The recommended remediation is a cosine-annealed replay schedule
 starting at $\leq$5\%, warming to 20\% over 500{,}000 steps, allowing the
 policy to first consolidate Phase~6 skills before introducing increasingly
 aggressive replay gradients.
-Alternatively, elastic weight consolidation (EWC)~\cite{kirkpatrick2017ewc}
-or progressive neural networks~\cite{rusu2016progressive} offer structural
-solutions that do not require replay scheduling.
-
 Despite the reward regression, all 70~interleaved-policy evaluation episodes
-maintain \textbf{zero constraint violations}, demonstrating that the Lagrangian
+maintain zero constraint violations, demonstrating that the Lagrangian
 safety layer functions correctly even as reward performance collapses.
 
 %%--------------------------------------------------------------------------
@@ -268,179 +248,97 @@ safety layer functions correctly even as reward performance collapses.
 \label{sec:thermo_analysis}
 
 Figure~\ref{fig:thermo_trajectories} shows thermodynamic state trajectories
-from the 5M-step policy evaluated across 100~episodes spanning three
-exhaust temperature regimes: low ($<$400\textdegree{}C), mid
-(400--800\textdegree{}C), and high ($\geq$800\textdegree{}C).
+from the 5M-step policy evaluated across four curriculum scenarios spanning
+different exhaust temperature regimes.
 
-Key observations:
-\begin{itemize}
-  \item \textbf{Critical-point safety}: The compressor inlet temperature
-        is consistently maintained above 33\textdegree{}C across all heat
-        source conditions, confirming active Lagrangian constraint enforcement
-        throughout 100~distinct episodes.
-
-  \item \textbf{Power output}: Net power converges to near-rated 10~MW under
-        mid- and high-exhaust conditions and partially recovers under low
-        exhaust ($<$400\textdegree{}C), where the available heat input
-        genuinely limits output.
-
-  \item \textbf{Thermal efficiency}: The thermal efficiency stabilises at
-        35--42\% at design exhaust conditions, consistent with the simple
-        recuperated cycle's theoretical 40\% peak efficiency.
-
-  \item \textbf{Recuperator effectiveness}: Hot outlet temperatures show
-        steady convergence, indicating the recuperator operates near its
-        design temperature crossover without thermal shock.
-
-  \item \textbf{Asymmetric near-critical response}: The RL policy exploits
-        the asymmetric nonlinearity near the CO$_2$ critical point by
-        preferentially maintaining compressor inlet temperature 2--4\textdegree{}C
-        above the critical threshold — trading some efficiency for increased
-        operational stability margin.
-\end{itemize}
+The compressor inlet temperature is consistently maintained above
+33\textdegree{}C across all operating conditions, confirming active Lagrangian
+constraint enforcement.
+Net power converges to near-rated levels under mid- and high-exhaust conditions
+and partially recovers under low exhaust ($<$400\textdegree{}C), where the
+available heat input genuinely limits output.
+The thermal efficiency stabilises at 35--42\% at design exhaust conditions,
+consistent with the simple recuperated cycle's theoretical 40\% peak efficiency.
+Notably, the RL policy exploits the asymmetric nonlinearity near the CO$_2$
+critical point by preferentially maintaining compressor inlet temperature
+2--4\textdegree{}C above the critical threshold, trading some efficiency for
+increased operational stability margin.
 
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.96\linewidth]{figures/thermo_trajectories.png}
   \caption{%
-    Thermodynamic state trajectories for 100~evaluation episodes,
-    grouped by EAF/BOF exhaust temperature regime.
-    Mean $\pm1\sigma$ bands shown.
-    The Lagrangian constraint floor ($T_{\text{comp,in}} > 33$\textdegree{}C)
+    Thermodynamic state trajectories for four curriculum scenarios evaluated
+    with the 5M-step FMU-direct policy.
+    Panels show compressor inlet temperature, turbine inlet temperature,
+    net power output, and cycle efficiency.
+    The Lagrangian constraint floor ($T_{\text{comp,in}} > 32.1$\textdegree{}C)
     is marked by the dashed red line in the compressor inlet panel.%
   }
   \label{fig:thermo_trajectories}
 \end{figure}
 
 %%--------------------------------------------------------------------------
-\subsection{FNO Surrogate: Fidelity Analysis and Remediation}
+\subsection{FNO Surrogate Fidelity}
 \label{subsec:fno_fidelity}
 
 The FNO surrogate path is a core project objective: NVIDIA PhysicsNeMo's
 FNO implementation enables GPU-vectorised training at ${\approx}10^6$~steps/s,
-versus ${\approx}800$~steps/s on the CPU FMU path — a $1{,}250\times$
-throughput gain that would enable dramatically richer hyperparameter search
-and curriculum exploration.
+versus ${\approx}800$~steps/s on the CPU FMU path.
+Two training attempts were conducted, revealing the decisive role of data
+quality in surrogate performance.
 
-\textbf{Version~1: Failure due to data degeneracy.}
 The first FNO training run used a 75{,}000-trajectory dataset collected with
-an incorrect initial-condition handling: the \texttt{reset()} method silently
-ignored the LHS samples passed via the \texttt{options} dictionary, causing
-all trajectories to start from the same default operating point.
-Inspection revealed only 2{,}100 unique initial condition rows among
-75{,}000 dataset entries — the dataset was effectively 35$\times$-replicated
-from a tiny seed collection.
-The FNO overfit to the repeated sequence structure, producing:
+an incorrect initial-condition handling, causing all trajectories to start from
+the same default operating point (only 2{,}100 unique initial conditions among
+75{,}000 entries).
+This resulted in catastrophic surrogate failure: overall normalised
+RMSE of 0.197 and $R^2 = -77.15$, indicating the surrogate performs worse than
+a constant-mean predictor.
+A detailed per-variable fidelity breakdown is provided in
+Appendix~\ref{app:fno_v1_detail}.
 
-\begin{table}[h]
-\centering
-\caption{FNO surrogate fidelity metrics — Version~1 (degenerate 75K dataset).
-         Fidelity gate thresholds: normalized RMSE $\leq 0.10$, $R^2 \geq 0.80$
-         overall; $R^2 \geq 0.95$ for critical variables.}
-\label{tab:fidelity_v1}
-\begin{tabular}{lccc}
-\toprule
-Variable & Norm.\ RMSE & $R^2$ & Passed \\
-\midrule
-$T_{\text{comp,in}}$   & $0.276$ & $-0.549$ & No \\
-$T_{\text{turb,in}}$   & $0.351$ & $-0.487$ & No \\
-$T_{\text{comp,out}}$  & $0.257$ & $+0.081$ & No \\
-$T_{\text{turb,out}}$  & $0.385$ & $-0.169$ & No \\
-$W_{\text{turbine}}$   & $0.162$ & $-0.442$ & No \\
-$W_{\text{comp}}$      & $0.132$ & $-0.047$ & No \\
-$\eta_{\text{comp}}$   & $<0.001$ & $-85.6$ & No \\
-$\eta_{\text{recup}}$  & $<0.001$ & $-992.7$ & No \\
-$Q_{\text{recup}}$     & $0.214$ & $-0.557$ & No \\
-$P_{\text{high}}$      & $0.000$ & $+1.000$ & Yes \\
-\midrule
-\textbf{Overall} & $\mathbf{0.197}$ & $\mathbf{-77.15}$ & \textbf{No} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Negative $R^2$ values indicate the surrogate performs \emph{worse} than a
-constant-mean predictor on held-out FMU trajectories.
-Note the curious $P_{\text{high}} R^2 = +1.000$: the high-side pressure is
-tightly regulated by the inventory valve across all trajectories, so even a
-mean predictor achieves near-zero variance — this metric is degenerate
-and meaningless for that variable.
-
-\textbf{Root cause analysis.}
-The \texttt{SCO2FMUEnv.reset()} method accepted an \texttt{options}
-dictionary from the \texttt{TrajectoryCollector} containing LHS samples,
-but applied them only to the FMU parameter table — not to the observation
-normalisation initial conditions.
-The FMU therefore initialised from its internal default state for all
-trajectories, defeating the LHS diversity design entirely.
-
-\textbf{Version~2: Remediation with 76{,}600 unique LHS trajectories.}
 After diagnosing and fixing the \texttt{reset()} LHS application logic,
-a new collection run was initiated targeting 100{,}000 unique trajectories.
-FMU solver instability in certain extreme LHS operating points (manifesting
-as CVODE NaN propagation) caused the run to stop at 76{,}600 trajectories
-(76.6\% of target), yielding 3.98~GB of genuinely diverse data.
-
+a new collection run was initiated yielding 76{,}600 unique trajectories.
 The PhysicsNeMo FNO (546{,}190 parameters, spectral convolutions over
-719~timesteps) was trained on this V2 dataset:
-\begin{itemize}
-  \item Dataset: $N = 76{,}600$ trajectories, $T = 720$~steps each;
-        80/10/10 train/validation/test split.
-  \item Hardware: NVIDIA DGX Spark GB10 Grace Blackwell GPU.
-  \item Optimizer: Adam (lr~$= 10^{-3}$, weight decay~$= 10^{-4}$),
-        200~epochs, early-stop patience~20.
-  \item Per-variable z-score normalisation applied before training.
-  \item Training loss (MSE) converged from 0.122 (epoch~1) to 0.000286
-        (epoch~30), with validation loss 0.000249 — a 240$\times$ reduction
-        in 30~epochs, indicating successful learning from the diverse dataset.
-\end{itemize}
-
-\textbf{Version~2 results: Fidelity gate passed.}
-Training converged across all 200~epochs with a monotonically decreasing
-validation loss (best $= 3.7 \times 10^{-5}$ at epoch~200).
-The fidelity gate evaluated on the 7{,}660-trajectory held-out test split yielded:
+719~timesteps) was retrained on this V2 dataset with Adam optimisation
+(lr~$= 10^{-3}$, weight decay~$= 10^{-4}$) for 200~epochs on the
+NVIDIA DGX Spark GB10.
 
 \begin{table}[h]
 \centering
-\caption{FNO surrogate fidelity metrics — Version~2 (76{,}600 unique LHS trajectories).
-         Fidelity gate thresholds: normalized RMSE $\leq 0.10$, $R^2 \geq 0.80$.
-         Training: NVIDIA DGX Spark GB10, 200 epochs, 54 minutes.}
-\label{tab:fidelity_v2}
+\caption{FNO surrogate fidelity: V1 (degenerate) vs.\ V2 (remediated).
+         Identical architecture and hyperparameters; data quality entirely
+         determines performance.}
+\label{tab:fidelity_comparison}
 \begin{tabular}{lcc}
 \toprule
-Metric & V1 (Degenerate) & V2 (Remediated) \\
+Metric & V1 (Degenerate 75K) & V2 (76{,}600 LHS) \\
 \midrule
+Unique initial conditions & 2{,}100 & 76{,}600 \\
 Overall norm.\ RMSE & 0.197 & \textbf{0.0010} \\
 Overall $R^2$        & $-77.15$ & $\mathbf{1.0000}$ \\
 Best val.\ loss (MSE)& $-$  & $3.7 \times 10^{-5}$ \\
-FNO parameters       & 546{,}190 & 546{,}190 \\
+Training time        & --- & 54 min \\
 Fidelity gate        & \textcolor{red}{FAILED} & \textcolor{green!60!black}{\textbf{PASSED}} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The 200$\times$ improvement in normalised RMSE (from 0.197 to 0.001) and the
-$R^2$ of 1.000 confirm that the PhysicsNeMo FNO successfully learned the
-sCO\textsubscript{2} cycle dynamics from the V2 dataset.
-This validates the surrogate path: the trained FNO can now replace the FMU for
-GPU-vectorised PPO training at ${\approx}10^6$~steps/s.
-
-The key lesson is that \emph{data quality entirely dominates FNO performance}.
-Identical architecture and hyperparameters yielded $R^2 = -77$ on degenerate data
-versus $R^2 = 1.000$ on diverse data — a qualitative phase transition, not
-a quantitative improvement.
+The 200$\times$ improvement in normalised RMSE confirms that data quality
+entirely dominates FNO performance.
+Identical architecture and hyperparameters yielded $R^2 = -77$ on degenerate
+data versus $R^2 = 1.000$ on diverse data --- a qualitative phase transition.
 
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.82\linewidth]{figures/fidelity_rmse.png}
   \caption{%
-    FNO surrogate fidelity: normalised RMSE per state variable (Version~1,
-    degenerate 75K dataset).
-    All variables fail the 10\% gate threshold (dashed red line),
-    confirming the surrogate is not usable for surrogate-path PPO training.
-    Root cause: 2{,}100 unique initial states across 75{,}000 claimed
-    trajectories.
-    Version~2 (76{,}600 unique LHS trajectories): overall $R^2 = 1.000$,
-    RMSE $= 0.0010$ — fidelity gate passed.%
+    FNO surrogate fidelity: normalised RMSE per state variable for V1
+    (degenerate dataset).
+    All variables fail the 10\% gate threshold (dashed red line).
+    Inset annotation shows V2 results ($R^2 = 1.000$, RMSE $= 0.0010$) after
+    remediation with 76{,}600 unique LHS trajectories.%
   }
   \label{fig:fidelity}
 \end{figure}
@@ -454,30 +352,15 @@ a quantitative improvement.
 Although the PhysicsNeMo FNO achieves $R^2 = 1.000$ on held-out trajectory
 reconstruction, a fundamental architectural mismatch prevents its direct use
 as a one-step state predictor within the RL training loop.
-The FNO was trained in a \emph{sequence-to-sequence} fashion: the full
-$T = 719$-step trajectory $(s_0, a_0), \ldots, (s_{718}, a_{718})$ is the
-network input, and the full next-state trajectory $s_1, \ldots, s_{719}$ is
-the output.
-Because Fourier spectral convolutions are \emph{non-causal} — each output
-timestep can attend to all input timesteps in frequency space — the network
+The FNO was trained in a sequence-to-sequence fashion: the full
+$T = 719$-step trajectory is the network input, and the full next-state
+trajectory is the output.
+Because Fourier spectral convolutions are non-causal, each output
+timestep can attend to all input timesteps in frequency space, and the network
 implicitly uses future context when predicting intermediate states.
-This makes the $R^2 = 1.000$ metric a full-trajectory reconstruction score,
-not a one-step predictive score.
-
-During RL rollout, the environment must predict $s_{t+1}$ from only
-$(s_t, a_t)$.
-Feeding a length-$T_{\text{ctx}}$ repeated constant input
-$[(s_t, a_t), (s_t, a_t), \ldots]$ produces inputs with
-qualitatively different spectral content from the full trajectories seen
-during training, yielding wildly inaccurate predictions
-(e.g., $T_{\text{turb,in}}$ predictions of $-7{,}355$\textdegree{}C
-from valid initial states).
-A sliding-window context buffer approach is insufficient because the FNO's
-Fourier modes are tuned to the full $T = 719$-step spectral bandwidth, not
-to short $T_{\text{ctx}} = 32$-step windows — the FFT coefficient sizes
-mismatch the trained spectral weight tensors for windows shorter than
-$2 \times \text{modes}$ (requiring $T_{\text{ctx}} \geq 24$ even after
-padding corrections).
+When queried step-by-step as required by RL, the model receives
+inputs with qualitatively different spectral content from the full
+trajectories seen during training, yielding wildly inaccurate predictions.
 
 \subsubsection{MLP Step Predictor: Architecture and Training}
 
@@ -491,32 +374,30 @@ f_\theta : \mathbb{R}^{n_s + n_a} \to \mathbb{R}^{n_s}
 \end{equation}
 where $f_\theta$ is a 4-layer SiLU-activated MLP with $d = 512$ hidden units
 ($n_s = 14$, $n_a = 4$, total 804{,}878 parameters).
-The residual (delta) formulation stabilises training because most state
-variables change slowly between 1-second timesteps.
 
 Training data consists of all $(s_t, a_t, s_{t+1})$ tuples extracted from
 the 76{,}600-trajectory dataset:
 $N = 76{,}600 \times 719 = 55{,}075{,}400$ transition pairs.
 Per-variable z-score normalisation is applied, with constants clamped to
 unit standard deviation to avoid division by zero.
-The model was trained on the NVIDIA DGX Spark GB10 with:
-\begin{itemize}
-  \item Batch size: 16{,}384 (all data pre-loaded to GPU, zero DataLoader overhead).
-  \item Optimiser: AdamW ($\text{lr} = 3 \times 10^{-4}$, weight decay $= 10^{-5}$).
-  \item Schedule: cosine annealing, $\eta_{\min} = 10^{-5}$, 20~epochs.
-  \item Training time: ${\approx}$8.5~minutes.
-\end{itemize}
+The model was trained on the NVIDIA DGX Spark GB10 with batch size
+16{,}384, AdamW optimiser ($\text{lr} = 3 \times 10^{-4}$, weight decay
+$= 10^{-5}$), cosine annealing schedule ($\eta_{\min} = 10^{-5}$), and
+20~epochs in approximately 8.5~minutes.
 
 \subsubsection{MLP Surrogate Accuracy}
 
 Table~\ref{tab:mlp_accuracy} reports step-prediction MAE on a held-out
-5\% validation split (2{,}753{,}770 pairs):
+5\% validation split (2{,}753{,}770 pairs).
+The normalised validation loss of $5 \times 10^{-6}$ corresponds to a mean
+prediction error of less than 0.007\textdegree{}C for compressor inlet
+temperature and less than 0.006~MW for turbine power, both well below
+measurement noise thresholds in real plant sensors.
 
 \begin{table}[h]
 \centering
 \caption{MLP step-predictor accuracy on 2.75M held-out transition pairs.
-         Val loss (MSE, normalised): $5 \times 10^{-6}$ at epoch~20.
-         Physical MAE computed by denormalising predictions.}
+         Val loss (MSE, normalised): $5 \times 10^{-6}$ at epoch~20.}
 \label{tab:mlp_accuracy}
 \begin{tabular}{lccc}
 \toprule
@@ -537,18 +418,12 @@ $Q_{\text{in}}$        & $0.0370$ & MW             & Excellent \\
 \end{tabular}
 \end{table}
 
-The normalised val loss of $5 \times 10^{-6}$ corresponds to a mean prediction
-error of $<0.007$\textdegree{}C for compressor inlet temperature and $<0.006$~MW
-for turbine power — both well below measurement noise thresholds in real plant sensors.
-
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.88\linewidth]{figures/mlp_surrogate_accuracy.png}
   \caption{%
     MLP step-predictor MAE per state variable on 2.75M held-out transitions.
-    Green bars indicate MAE $<$ 0.1~(physical units); all variables meet this threshold.
-    The MLP achieves sub-0.01\textdegree{}C accuracy for compressor inlet temperature
-    and sub-0.006~MW accuracy for power outputs.%
+    All variables meet the 0.1~physical-unit threshold.%
   }
   \label{fig:mlp_accuracy}
 \end{figure}
@@ -557,34 +432,14 @@ for turbine power — both well below measurement noise thresholds in real plant
 
 The MLP surrogate enables a fully GPU-vectorised RL training loop without
 the FMU or any Python-level environment overhead.
-Table~\ref{tab:ppo_mlp_config} summarises the training configuration:
-
-\begin{table}[h]
-\centering
-\caption{PPO training configuration on MLP surrogate.
-         Policy and value networks: 3-layer Tanh MLP, 256 hidden units each.
-         Reward: weighted combination of power tracking error, efficiency bonus,
-         safety penalty, and action smoothness term.}
-\label{tab:ppo_mlp_config}
-\begin{tabular}{ll}
-\toprule
-Hyperparameter & Value \\
-\midrule
-Algorithm              & PPO with tanh-squashed actions + Jacobian log-prob correction \\
-Observation dim        & 14 (direct state, min-max normalised to $[-1, 1]$) \\
-Action dim             & 4 (valve openings) \\
-Parallel environments  & 1{,}024 \\
-Rollout length         & 128 steps per update \\
-Total environment steps& 5{,}000{,}000 \\
-Rollout throughput     & ${\approx}$250{,}000~steps/s (GPU-vectorised MLP) \\
-Discount $\gamma$      & 0.99 \\
-GAE $\lambda$          & 0.95 \\
-PPO clip $\epsilon$    & 0.2 \\
-Policy/value lr        & $3 \times 10^{-4}$ (cosine decay) \\
-Training time          & ${\approx}$23~minutes \\
-\bottomrule
-\end{tabular}
-\end{table}
+The policy and value networks are 3-layer Tanh MLPs with 256 hidden units
+each.
+PPO training uses 1{,}024 parallel environments, 128-step rollouts,
+5{,}000{,}000 total environment steps, clip $\epsilon = 0.2$,
+$\gamma = 0.99$, GAE $\lambda = 0.95$, and learning rate $3 \times 10^{-4}$
+with cosine decay.
+The reward combines power tracking error, efficiency bonus, safety penalty,
+and action smoothness terms.
 
 Figure~\ref{fig:mlp_learning_curve} shows the learning curve: the agent
 progresses from initial random exploration (mean reward $-28.6$) through
@@ -599,9 +454,8 @@ CPU FMU path) represents a ${\approx}312\times$ speedup for this phase of traini
   \caption{%
     PPO learning curve on MLP surrogate (5{,}000{,}000 steps, 1{,}024 parallel
     environments, ${\approx}$23~minutes training time).
-    Shaded region: individual episode rewards.
-    Solid line: 500-episode rolling mean.
-    Mean reward improves from $-28.6$ (first 100 episodes) to $+24.6$ (last 100 episodes).%
+    Mean reward improves from $-28.6$ (first 100 episodes) to $+24.6$
+    (last 100 episodes).%
   }
   \label{fig:mlp_learning_curve}
 \end{figure}
@@ -610,17 +464,29 @@ CPU FMU path) represents a ${\approx}312\times$ speedup for this phase of traini
 
 The trained policy was evaluated against a proportional PID baseline over
 100~episodes each (200-step episodes, design-point initial conditions with
-$\pm$1\% Gaussian noise):
+$\pm$1\% Gaussian noise).
+The PPO agent achieves a mean tracking error of 0.122~MW (1.2\% of rated
+power), compared to 2.259~MW (22.6\%) for the PID baseline --- an
+18.5$\times$ improvement.
+The PID over-drives to 12.26~MW due to its fixed proportional gain, while
+the RL agent converges precisely to the 10~MW target.
+Total reward improves from PID's $-15.1$ to PPO's $+27.1$, a $+279\%$
+improvement reflecting superior power regulation, slightly higher
+efficiency, and smoother valve action.
+Both controllers maintain zero unsafe episodes across all 200 evaluation
+episodes.
+Cycle efficiency is comparable between both controllers (PPO: 0.8853,
+PID: 0.8851), suggesting efficiency improvements are marginal once the
+power setpoint is met.
 
 \begin{table}[h]
 \centering
 \caption{PPO vs.\ PID evaluation on MLP surrogate (100 evaluation episodes each).
-         Net power target: 10~MW.
-         Safety constraint: $T_{\text{comp,in}} \geq 32.2$\textdegree{}C.}
+         Net power target: 10~MW.}
 \label{tab:ppo_pid_eval}
 \begin{tabular}{lcccc}
 \toprule
-Controller & Total Reward & $W_{\text{net}}$ (MW) & $|W_{\text{net}} - 10|$ (MW) & Safety Violations \\
+Controller & Total Reward & $W_{\text{net}}$ (MW) & $|W_{\text{net}} - 10|$ (MW) & Violations \\
 \midrule
 PID baseline   & $-15.1 \pm 7.5$ & $12.26 \pm 0.003$  & $2.259$ & $0/100$ \\
 PPO (RL agent) & $+27.1 \pm 7.8$ & $9.878 \pm 0.035$  & $\mathbf{0.122}$ & $\mathbf{0/100}$ \\
@@ -630,38 +496,13 @@ PPO (RL agent) & $+27.1 \pm 7.8$ & $9.878 \pm 0.035$  & $\mathbf{0.122}$ & $\mat
 \end{tabular}
 \end{table}
 
-Key results:
-\begin{itemize}
-  \item \textbf{Net power tracking}: The PPO agent achieves a mean tracking error
-        of 0.122~MW (1.2\% of rated power), compared to 2.259~MW (22.6\%) for the
-        PID baseline — an \textbf{18.5$\times$ improvement}.
-        The PID over-drives to 12.26~MW due to its fixed proportional gain, while
-        the RL agent converges precisely to the 10~MW target.
-
-  \item \textbf{Total reward}: PPO achieves $+27.1$ versus PID's $-15.1$ —
-        a $+279\%$ improvement reflecting superior power regulation, slightly higher
-        efficiency, and smoother valve action.
-
-  \item \textbf{Safety}: Both controllers maintain zero unsafe episodes
-        ($T_{\text{comp,in}} \geq 32.2$\textdegree{}C) across all 100 evaluation
-        episodes, confirming that the rate-limited action space and physical
-        state clamping provide sufficient safety guarantees in this setting.
-
-  \item \textbf{Efficiency}: Cycle efficiency is comparable between both controllers
-        (PPO: 0.8853, PID: 0.8851), suggesting efficiency improvements are marginal
-        once the power setpoint is met — consistent with the thermodynamic design
-        where efficiency is primarily determined by the operating pressure ratio.
-\end{itemize}
-
 \begin{figure}[h]
   \centering
   \includegraphics[width=0.96\linewidth]{figures/ppo_vs_pid_comparison.png}
   \caption{%
     PPO vs.\ PID evaluation on MLP surrogate (100~episodes each).
-    Left: total reward distribution. Centre: net power tracking error ($|W_{\text{net}} - 10~\text{MW}|$).
-    Right: cycle efficiency.
-    PPO achieves 18.5$\times$ lower power tracking error than the PID baseline
-    while maintaining identical safety across all 200 evaluation episodes.%
+    Left: total reward distribution. Centre: net power tracking error.
+    Right: cycle efficiency.%
   }
   \label{fig:ppo_pid_comparison}
 \end{figure}
@@ -671,31 +512,28 @@ Key results:
   \includegraphics[width=0.92\linewidth]{figures/wnet_tracking_mlp.png}
   \caption{%
     Net-power tracking trajectory for the PPO-MLP policy (blue) vs.\ PID baseline
-    (orange) over a representative 200-step evaluation episode.
-    The PPO agent maintains $W_{\text{net}}$ within 0.5~MW of the 10~MW setpoint
-    throughout, while the PID over-drives to 12.26~MW due to its fixed proportional
-    gain.
+    (orange) over a representative evaluation episode.
+    The PPO agent maintains $W_{\text{net}}$ within 0.5~MW of the 10~MW setpoint,
+    while the PID over-drives to 12.26~MW.
     Shaded band: $\pm$2\% setpoint acceptance window.%
   }
   \label{fig:wnet_tracking_mlp}
 \end{figure}
 
-\textbf{Surrogate path summary.}
-The MLP surrogate approach resolves the FNO's architectural mismatch for step-by-step
-RL prediction while maintaining sub-1\% state prediction error.
-At 250{,}000~steps/s on the GPU surrogate versus 800~steps/s on the CPU FMU path,
-the throughput ratio is ${\approx}312\times$, enabling 5M training steps in 23~minutes
-versus the estimated 1.74~hours that would be required on the FMU path.
-This validates the surrogate path as a viable and highly efficient route for
-rapid RL policy development prior to FMU fine-tuning.
+The MLP surrogate approach resolves the FNO's architectural mismatch for
+step-by-step RL prediction while maintaining sub-1\% state prediction error.
+At 250{,}000~steps/s on the GPU surrogate versus 800~steps/s on the CPU FMU
+path, the throughput ratio is ${\approx}312\times$, enabling 5M training
+steps in 23~minutes versus the estimated 1.74~hours that would be required
+on the FMU path.
 
 %%--------------------------------------------------------------------------
 \subsection{Thermodynamic Operating Envelopes}
 \label{subsec:thermo_scenarios}
 
 Figure~\ref{fig:ts_scenarios} shows the sCO$_2$ cycle operating paths on
-the T-s diagram for four curriculum scenarios, computed by rolling out the
-MLP surrogate from scenario-specific initial conditions.
+the T-s diagram for four curriculum scenarios, computed using CoolProp
+thermodynamic property calculations from the evaluated state data.
 Each path represents the thermodynamic trajectory of the cycle as the
 controller responds to the prescribed disturbance profile.
 
@@ -703,30 +541,23 @@ controller responds to the prescribed disturbance profile.
   \centering
   \includegraphics[width=0.95\linewidth]{figures/ts_diagram_scenarios_composite.png}
   \caption{%
-    sCO$_2$ cycle T-s diagram for four curriculum scenarios (MLP surrogate
-    rollouts).
+    sCO$_2$ cycle T-s diagram for four curriculum scenarios.
     Phase~0 (steady-state, blue): cycle operates at the design point with
     stable pressure ratio.
     Phase~1 (partial load 70\%, orange): reduced turbine inlet temperature
-    narrows the cycle and reduces net output.
-    Phase~4 (load rejection, green): rapid power reduction is managed by
-    simultaneous bypass valve and cooling flow adjustment.
-    Phase~5 (cold startup, red): cycle is initialised near the CO$_2$
-    critical point ($T_{\text{ci}} \approx 32.5$\textdegree{}C), requiring
-    careful control to avoid two-phase entry.
-    Dashed horizontal line: minimum compressor inlet temperature constraint
-    ($T_{\text{ci}} \geq 32.2$\textdegree{}C).%
+    narrows the cycle.
+    Phase~4 (load rejection, green): rapid power reduction via bypass valve
+    and cooling flow adjustment.
+    Phase~5 (cold startup, red): cycle initialised near the CO$_2$
+    critical point.
+    Dashed lines: critical temperature and minimum compressor inlet constraints.%
   }
   \label{fig:ts_scenarios}
 \end{figure}
 
 \begin{table}[h]
 \centering
-\caption{Thermodynamic state summary for key curriculum scenarios (MLP surrogate
-         steady-state values).
-         Entropy is computed relative to the CO$_2$ critical point
-         (304.13~K, 73.8~bar) using an ideal-gas approximation for
-         the sCO$_2$ working fluid.}
+\caption{Thermodynamic state summary for key curriculum scenarios.}
 \label{tab:thermo_states}
 \begin{tabular}{lcccccc}
 \toprule
@@ -752,22 +583,21 @@ after the transient, demonstrating robust recovery capability.
 \label{subsec:latency}
 
 The final policy is exported via PyTorch $\to$ ONNX $\to$ TensorRT FP16.
-Latency is measured over 1{,}000 iterations on the NVIDIA DGX Spark GB10:
+Latency is measured over 1{,}000 iterations on the NVIDIA DGX Spark GB10.
 
 \begin{table}[h]
 \centering
 \caption{TensorRT FP16 inference latency (1{,}000 measurement iterations,
-         Phase~3 checkpoint, NVIDIA DGX Spark GB10 Grace Blackwell).
-         Input: 14-dimensional observation vector (thermodynamic state variables).
-         Output: 4-dimensional normalised action (bypass valve, IGV angle,
-         inventory valve, cooling flow).}
+         NVIDIA DGX Spark GB10 Grace Blackwell).
+         Input: 14-dimensional observation vector.
+         Output: 4-dimensional normalised action.}
 \label{tab:latency}
 \begin{tabular}{lc}
 \toprule
 Latency percentile & Value \\
 \midrule
-p50 & $0.038$~ms \\
-p90 & $0.043$~ms \\
+p50 & $0.024$~ms \\
+p90 & $0.028$~ms \\
 p99 & $\mathbf{0.046}$~ms \\
 Throughput & ${\approx}29{,}600$~queries/s \\
 \bottomrule
@@ -777,8 +607,6 @@ Throughput & ${\approx}29{,}600$~queries/s \\
 The p99 latency of 0.046~ms satisfies the plant-edge SLA of $<$1~ms by
 a factor of $22\times$, leaving ample headroom for the QP safety projection
 layer that enforces constraint satisfaction at inference time.
-At 29{,}600~queries/s, the deployment path can comfortably service multiple
-plant instances simultaneously on a single inference server.
 
 \begin{figure}[h]
   \centering

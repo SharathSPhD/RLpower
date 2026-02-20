@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 class _Policy(GaussianMixin, Model):
     """Gaussian stochastic policy for PPO."""
 
-    def __init__(self, observation_space, action_space, device, clip_actions=False,
+    def __init__(self, observation_space, action_space, device, clip_actions=True,
                  hidden_size: int = 256):
         Model.__init__(self, observation_space, action_space, device)
         GaussianMixin.__init__(self, clip_actions)
@@ -48,6 +48,10 @@ class _Policy(GaussianMixin, Model):
             nn.Tanh(),
             nn.Linear(hidden_size // 2, self.num_actions),
         )
+        # Initialize last layer with very small weights to prevent tanh saturation
+        # on first pass (avoids arctanh(±1) = ±inf during PPO log-prob computation)
+        nn.init.orthogonal_(self.net[-1].weight, gain=0.01)
+        nn.init.zeros_(self.net[-1].bias)
         self.log_std = nn.Parameter(-0.5 * torch.ones(self.num_actions))
 
     def compute(self, inputs, role):
@@ -208,12 +212,12 @@ class SurrogateTrainer:
         cfg = dict(PPO_DEFAULT_CONFIG)
         cfg.update({
             "rollouts": self._config.get("rollout_steps", 16),
-            "learning_epochs": self._config.get("learning_epochs", 10),
-            "mini_batches": self._config.get("mini_batches", 8),
+            "learning_epochs": self._config.get("learning_epochs", 4),
+            "mini_batches": self._config.get("mini_batches", 4),
             "discount_factor": self._config.get("discount_factor", 0.99),
             "lambda": self._config.get("lambda_gae", 0.95),
-            "policy_learning_rate": self._config.get("policy_learning_rate", 3e-4),
-            "value_learning_rate": self._config.get("value_learning_rate", 3e-4),
+            "policy_learning_rate": self._config.get("policy_learning_rate", 1e-4),
+            "value_learning_rate": self._config.get("value_learning_rate", 1e-4),
             "clip_ratio": self._config.get("clip_param", 0.2),
             "entropy_loss_scale": self._config.get("entropy_loss_scale", 0.01),
             "value_loss_scale": self._config.get("value_loss_scale", 0.5),
@@ -225,7 +229,9 @@ class SurrogateTrainer:
             },
         })
 
-        policy = _Policy(obs_space, act_space, device)
+        # clip_actions=True applies tanh squashing → actions always in (-1,1)
+        # prevents unbounded actions being stored in memory and causing NaN PPO ratios
+        policy = _Policy(obs_space, act_space, device, clip_actions=True)
         value = _Value(obs_space, act_space, device)
 
         memory_size = max(

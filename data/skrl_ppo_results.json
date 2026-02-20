@@ -1,0 +1,15 @@
+{
+  "model": "SKRL_PPO_v3",
+  "skrl_ppo_mean_reward": -100.0,
+  "skrl_ppo_std_reward": 0.0,
+  "skrl_ppo_mean_ep_len": 1.0,
+  "random_baseline_mean_reward": 28.509,
+  "improvement_vs_random": -128.509,
+  "single_env_steps_per_s": 1990.0,
+  "est_1024_env_Msteps_per_s": 2.04,
+  "speedup_vs_fmu_direct": 2547.0,
+  "total_transitions": 4999168,
+  "training_duration_min": 14.8,
+  "n_envs": 1024,
+  "hardware": "NVIDIA DGX Spark GB10 Grace Blackwell"
+}

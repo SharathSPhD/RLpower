@@ -102,6 +102,11 @@ class SurrogateEnv(gym.Env):
                 and self._next_obs_mean.shape[0] == self._n_obs
                 and self._next_obs_std.shape[0] == self._n_obs
             )
+        # Min-max normalization of history observations returned to the RL policy.
+        # Uses obs_bounds range; avoids the zero-std problem for constant variables
+        # (e.g. eta, p_outlet which don't vary during FNO training data collection).
+        self._hist_lo = np.tile(self._obs_lo, self._history_steps)
+        self._hist_range = np.tile(self._obs_range, self._history_steps)
 
         # Action config (physical bounds + rate limit)
         action_cfg = config.get("action_config", {})
@@ -190,7 +195,7 @@ class SurrogateEnv(gym.Env):
         self._step_count = 0
         self._episode_constraint_violations = 0
 
-        obs = self._history.copy()
+        obs = self._normalized_history()
         info: dict[str, Any] = {"step": 0}
         return obs, info
 
@@ -273,7 +278,7 @@ class SurrogateEnv(gym.Env):
         self._prev_action = action.copy()
         self._prev_phys_action = phys_action.copy()
 
-        obs = self._history.copy()
+        obs = self._normalized_history()
         info: dict[str, Any] = {
             "step": self._step_count,
             "phys_action": phys_action,
@@ -289,6 +294,10 @@ class SurrogateEnv(gym.Env):
     def _normalize_state(self, state: np.ndarray) -> np.ndarray:
         """Normalize physical state to [0, 1] range."""
         return (state - self._obs_lo) / self._obs_range
+
+    def _normalized_history(self) -> np.ndarray:
+        """Return history buffer normalized to [-1, 1] via obs_bounds min-max."""
+        return (2.0 * (self._history - self._hist_lo) / self._hist_range - 1.0).astype(np.float32)
 
     def _compute_reward(
         self,

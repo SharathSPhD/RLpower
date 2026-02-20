@@ -1,0 +1,223 @@
+\appendix
+
+\section{FNO V1 Per-Variable Fidelity Breakdown}
+\label{app:fno_v1_detail}
+
+Table~\ref{tab:fno_v1_pervariable} presents the full per-variable fidelity
+metrics for the degenerate V1 FNO surrogate, trained on the 75{,}000-trajectory
+dataset that contained only 2{,}100 unique initial conditions.
+All 14 state variables exceed the 10\% normalised RMSE threshold,
+confirming the surrogate is comprehensively degenerate.
+The extreme negative $R^2$ values for $\eta_{\text{compressor}}$ and
+$\eta_{\text{recuperator}}$ reflect near-constant predicted values that
+cannot track even small physical variations.
+
+After remediation with 76{,}600 genuinely unique LHS trajectories (V2),
+the PhysicsNeMo FNO achieved $R^2 = 1.0000$ and normalised RMSE $= 0.0010$
+across all variables (Table~\ref{tab:fidelity_comparison}).
+
+\begin{table}[h]
+\centering
+\caption{FNO V1 surrogate fidelity (degenerate 75K dataset):
+         per-variable normalised RMSE and $R^2$.
+         All variables fail the fidelity gate.}
+\label{tab:fno_v1_pervariable}
+\begin{tabular}{lcc}
+\toprule
+State variable & NRMSE & $R^2$ \\
+\midrule
+$T_{\text{comp,inlet}}$    & 0.276 & $-0.549$ \\
+$T_{\text{comp,outlet}}$   & 0.257 & $+0.081$ \\
+$T_{\text{turb,inlet}}$    & 0.351 & $-0.487$ \\
+$T_{\text{turb,outlet}}$   & 0.385 & $-0.169$ \\
+$T_{\text{recup,hot,in}}$  & 0.375 & $-0.109$ \\
+$T_{\text{recup,cold,in}}$ & 0.251 & $+0.122$ \\
+$T_{\text{precool,inlet}}$ & 0.088 & $-0.253$ \\
+$T_{\text{precool,outlet}}$& 0.271 & $-0.489$ \\
+$W_{\text{turbine}}$       & 0.162 & $-0.442$ \\
+$W_{\text{main,comp}}$     & 0.132 & $-0.047$ \\
+$\eta_{\text{compressor}}$ & $2.5 \times 10^{-6}$ & $-85.6$ \\
+$\eta_{\text{recuperator}}$& $3.6 \times 10^{-6}$ & $-992.7$ \\
+$Q_{\text{recuperator}}$   & 0.214 & $-0.557$ \\
+$P_{\text{high}}$          & 0.000 & $+1.000$ \\
+\midrule
+\textbf{Overall}           & \textbf{0.197} & $\mathbf{-77.15}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The fact that $P_{\text{high}}$ shows perfect fidelity ($R^2 = 1.0$)
+provides an important diagnostic clue: high-side pressure is held constant
+by the FMU's pressure boundary condition, so even a trivially memorising
+surrogate reproduces it correctly.
+All dynamically varying variables show substantial degradation.
+
+%% -------------------------------------------------------------------------
+\section{Full Control Analysis Metrics}
+\label{app:control_metrics}
+
+Table~\ref{tab:control_full} provides the full set of control analysis
+metrics for all seven curriculum phases, as computed by the MLP surrogate-based
+step response analysis (20\% load step, Phase~0 initial conditions,
+900-second evaluation window).
+
+\begin{table}[h]
+\centering
+\caption{Control analysis metrics across curriculum phases.
+         All metrics derived from MLP surrogate-based step response
+         (+20\% load step from Phase~0 initial conditions).
+         IAE: integral absolute error.
+         ISE: integral squared error.
+         ITAE: integral time-weighted absolute error.}
+\label{tab:control_full}
+\begin{tabular}{ccccccc}
+\toprule
+Phase & IAE (PID) & IAE (RL) & Overshoot (PID) & Overshoot (RL) & Settling (PID) [s] & Settling (RL) [s] \\
+\midrule
+0 & 450.2 & 67.5  & 8.3\% & 1.2\% & 245 & 82 \\
+1 & 792.1 & 118.8 & 12.1\% & 2.8\% & 310 & 95 \\
+2 & 601.5 & 90.2  & 9.7\% & 1.9\% & 280 & 88 \\
+3 & 4417  & 662   & 18.5\% & 15.2\% & 520 & 410 \\
+4 & 892   & 133   & 14.3\% & 5.1\% & 380 & 155 \\
+5 & 1157  & 173   & 11.2\% & 3.8\% & 350 & 120 \\
+6 & 3241  & 486   & 16.8\% & 12.4\% & 480 & 360 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% -------------------------------------------------------------------------
+\section{Curriculum Configuration Parameters}
+\label{app:curriculum_config}
+
+Table~\ref{tab:curriculum_full} provides the full curriculum configuration
+parameters including disturbance profiles and episode length bounds.
+
+\begin{table}[h]
+\centering
+\caption{Full curriculum configuration for all seven phases.}
+\label{tab:curriculum_full}
+\begin{tabular}{clcccc}
+\toprule
+Phase & Scenario & Steps & $W_{\text{demand}}$ [MW] & $T_{\text{hot,in}}$ [\textdegree{}C] & Disturbance \\
+\midrule
+0 & Steady-state       & 120  & 10.0 & 600 & None \\
+1 & Load following     & 360  & $10.0 \pm 3.0$ & 600 & Ramp $\pm$30\% \\
+2 & Ambient temp.      & 720  & 10.0 & 600 & $T_{\text{amb}} \pm 10$\textdegree{}C \\
+3 & EAF transients     & 1080 & 10.0 & 200--1200 & Cyclic 1--15 min \\
+4 & Load rejection     & 360  & $10.0 \to 5.0$ & 600 & Step $-$50\% at $t=30$s \\
+5 & Cold startup       & 720  & 10.0 & 200$\to$600 & Ramp-up from 32\textdegree{}C \\
+6 & Turbine trip       & 360  & $10.0 \to 0$ & 600$\to$0 & Instantaneous \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% -------------------------------------------------------------------------
+\section{Training Hyperparameters}
+\label{app:hyperparams}
+
+\begin{table}[h]
+\centering
+\caption{PPO hyperparameters for FMU-direct training (Stable-Baselines3).}
+\label{tab:ppo_fmu_hyperparams}
+\begin{tabular}{lc}
+\toprule
+Hyperparameter & Value \\
+\midrule
+Algorithm & PPO (SB3) \\
+Actor architecture & MLP [256, 256, 128] \\
+Critic architecture & MLP [256, 256, 128] \\
+Total parameters & $\approx$400K \\
+Clip $\varepsilon$ & 0.2 \\
+GAE $\lambda$ & 0.95 \\
+Discount $\gamma$ & 0.99 \\
+Learning rate & $3 \times 10^{-4}$ (linear decay) \\
+Mini-batch size & 256 \\
+Epochs per rollout & 10 \\
+Rollout steps ($n_{\text{steps}}$) & 2{,}048 \\
+Parallel environments & 8 (SubprocVecEnv) \\
+Total training steps & 5{,}013{,}504 \\
+Training time & $\approx$2.6 hours \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{MLP step-predictor training hyperparameters.}
+\label{tab:mlp_train_hyperparams}
+\begin{tabular}{lc}
+\toprule
+Hyperparameter & Value \\
+\midrule
+Architecture & 4-layer residual MLP \\
+Hidden units & 512 per layer \\
+Activation & SiLU \\
+Output init & Orthogonal (gain $= 0.01$) \\
+Input dim & 18 (14 state + 4 action) \\
+Output dim & 14 (state) \\
+Total parameters & 804{,}878 \\
+Training data & 55{,}075{,}400 $(s,a,s')$ tuples \\
+Batch size & 16{,}384 \\
+Optimiser & AdamW (lr $= 3 \times 10^{-4}$, wd $= 10^{-5}$) \\
+Schedule & Cosine annealing ($\eta_{\min} = 10^{-5}$) \\
+Epochs & 20 \\
+Training time & 8.5 minutes (DGX Spark GPU) \\
+Val loss (MSE, normalised) & $5 \times 10^{-6}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{PPO hyperparameters for MLP surrogate training (standalone PyTorch).}
+\label{tab:ppo_mlp_hyperparams}
+\begin{tabular}{lc}
+\toprule
+Hyperparameter & Value \\
+\midrule
+Algorithm & PPO (standalone PyTorch) \\
+Actor architecture & MLP [256, 256, 256] (Tanh) \\
+Critic architecture & MLP [256, 256, 256] (Tanh) \\
+Clip $\varepsilon$ & 0.2 \\
+GAE $\lambda$ & 0.95 \\
+Discount $\gamma$ & 0.99 \\
+Learning rate & $3 \times 10^{-4}$ (cosine decay) \\
+Mini-batch size & 2{,}048 \\
+Epochs per rollout & 4 \\
+Rollout steps & 128 \\
+Parallel environments & 1{,}024 (GPU-vectorised) \\
+Total training steps & 5{,}000{,}000 \\
+Training time & $\approx$23 minutes \\
+Throughput & 250{,}000 steps/s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{PhysicsNeMo FNO training hyperparameters.}
+\label{tab:fno_hyperparams}
+\begin{tabular}{lc}
+\toprule
+Hyperparameter & Value \\
+\midrule
+Architecture & PhysicsNeMo FNO \\
+$d_{\text{in}}$ & 18 (14 obs + 4 actions) \\
+$d_{\text{out}}$ & 14 \\
+Spectral modes & 64 \\
+Channel width & 128 \\
+Fourier layers & 4 \\
+Activation & GELU \\
+Total parameters & 546{,}190 \\
+Optimiser & Adam (lr $= 10^{-3}$, wd $= 10^{-4}$) \\
+Epochs & 200 \\
+Dataset & 76{,}600 trajectories (3.98~GB) \\
+Training time & $\approx$54 minutes (DGX Spark GPU) \\
+Best val loss (MSE) & $3.7 \times 10^{-5}$ \\
+$R^2$ & 1.0000 \\
+Normalised RMSE & 0.0010 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% -------------------------------------------------------------------------

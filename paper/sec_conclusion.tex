@@ -2,123 +2,103 @@
 \label{sec:conclusion}
 %% ---------------------------------------------------------------------------
 
-This paper presents sCO2RL, a complete end-to-end reinforcement learning pipeline
-for autonomous control of a supercritical CO$_2$ recuperated Brayton cycle
-recovering waste heat from steel industry furnace exhaust.
+This paper has presented sCO2RL, a complete end-to-end reinforcement learning
+pipeline for autonomous control of a supercritical CO$_2$ recuperated Brayton
+cycle recovering waste heat from steel industry furnace exhaust.
 The system integrates physics-faithful FMU simulation, structured curriculum RL
 with Lagrangian safety constraints, an MLP step-predictor surrogate enabling
 GPU-vectorised training at 250{,}000~steps/s, NVIDIA PhysicsNeMo FNO surrogate
-validation, and TensorRT-FP16 deployment — the first such openly-published
+validation, and TensorRT-FP16 deployment --- the first such openly-published
 combination for sCO$_2$ WHR applications.
 
-\textbf{Key empirical findings.}
-\begin{itemize}
-  \item \textbf{RL surpasses Ziegler--Nichols PID on well-trained phases.}
-        The 5{,}013{,}504-step FMU-direct policy achieves $+30.3\%$, $+30.4\%$,
-        and $+39.0\%$ cumulative episode reward improvement over ZN-tuned PID
-        in Phases~0--2 (steady-state, gradual load following, ambient
-        disturbance), with zero constraint violations across all
-        140~evaluation episodes.
-        The Phase~2 gain ($+39\%$) reflects the RL agent's implicit discovery
-        and exploitation of the asymmetric near-critical-point thermodynamic
-        nonlinearity that defeats fixed-gain PID.
+The experimental evaluation has yielded several key findings that advance the
+state of the art in RL-based thermodynamic cycle control.
+On the FMU-direct training path, the 5{,}013{,}504-step PPO policy achieved
+$+30.3\%$, $+30.4\%$, and $+39.0\%$ cumulative episode reward improvement
+over the Ziegler--Nichols-tuned PID baseline in Phases~0--2 (steady-state,
+gradual load following, and ambient disturbance), with zero constraint
+violations across all 140~evaluation episodes.
+The Phase~2 gain of $+39\%$ is particularly notable, as it reflects the
+RL agent's implicit discovery and exploitation of the asymmetric
+near-critical-point thermodynamic nonlinearity that defeats fixed-gain PID.
 
-  \item \textbf{MLP surrogate enables rapid, high-fidelity RL training.}
-        The residual MLP step predictor (4~layers, 512~hidden units, trained on
-        55M transitions in 8.5~min) achieves val\_loss $= 5{\times}10^{-6}$
-        and enables GPU-vectorised PPO at 250{,}000~steps/s — over $470\times$
-        faster than the CPU FMU path.
-        The MLP-trained policy achieves 18.5$\times$ lower net-power tracking
-        error than the PID baseline (0.122~MW vs.\ 2.259~MW) in just
-        23~minutes of training, validating the surrogate path as an
-        effective route for rapid policy development before FMU fine-tuning.
+The MLP surrogate path has demonstrated that rapid, high-fidelity RL training
+is achievable without direct FMU access during the policy search phase.
+The residual MLP step predictor (4~layers, 512~hidden units, trained on
+55M transitions in 8.5~minutes) achieves a validation loss of
+$5{\times}10^{-6}$ and enables GPU-vectorised PPO at 250{,}000~steps/s ---
+over $470\times$ faster than the CPU FMU path.
+The MLP-trained policy achieves 18.5$\times$ lower net-power tracking
+error than the PID baseline (0.122~MW vs.\ 2.259~MW) in just
+23~minutes of training, validating the surrogate path as an
+effective route for rapid policy development before FMU fine-tuning.
 
-  \item \textbf{FNO is architecturally incompatible with step-by-step RL.}
-        Despite achieving $R^2 = 1.000$ on full trajectory reconstruction,
-        the FNO cannot be used directly for RL without modification: its
-        non-causal global Fourier convolutions produce spectral aliasing when
-        queried step-by-step, causing policy gradient collapse.
-        This finding is an important negative result for practitioners
-        considering FNO surrogates for RL training.
+A significant negative result concerns the FNO surrogate: despite achieving
+$R^2 = 1.000$ on full trajectory reconstruction, the FNO's non-causal global
+Fourier convolutions produce spectral aliasing when queried step-by-step,
+causing policy gradient collapse.
+This finding provides concrete guidance for practitioners considering
+FNO surrogates for RL training loops.
 
-  \item \textbf{Curriculum imbalance limits Phases 3--6.}
-        Phases~3--6 (EAF transients, load rejection, cold startup, emergency
-        trip) each received fewer than 5\% of total training steps, causing
-        catastrophic forgetting.
-        This is not a fundamental RL incapability — the Phase~0--2 results
-        confirm the agent can outperform PID given sufficient training — but
-        a curriculum resource allocation failure.
+The curriculum imbalance observed in Phases~3--6, where each phase received
+fewer than 5\% of total training steps resulting in catastrophic forgetting,
+is not a fundamental RL incapability.
+The Phase~0--2 results confirm the agent can outperform PID given sufficient
+training; the limitation lies in curriculum resource allocation.
 
-  \item \textbf{Safety is unconditionally maintained.}
-        Zero CO$_2$ critical-point constraint violations across all evaluation
-        episodes (FMU-direct: 140~episodes; MLP surrogate: 100~episodes)
-        confirms that the Lagrangian safety mechanism and rate-limited action
-        space function correctly regardless of reward-level policy quality.
+Throughout all evaluation episodes --- 140 on the FMU-direct path,
+100 on the MLP surrogate, and 70 on the interleaved experiment --- zero
+CO$_2$ critical-point constraint violations were recorded, confirming that the
+Lagrangian safety mechanism and rate-limited action space function correctly
+regardless of reward-level policy quality.
 
-  \item \textbf{FNO data quality is decisive.}
-        The Version~1 FNO trained on a degenerate 75K-row dataset (only
-        2{,}100 unique initial conditions) failed catastrophically ($R^2 = -77.15$).
-        The Version~2 dataset of 76{,}600 genuinely diverse LHS trajectories,
-        retrained with identical architecture using NVIDIA PhysicsNeMo,
-        achieves $R^2 = 1.000$ and normalised RMSE~$= 0.0010$ on the held-out
-        test split — passing the fidelity gate in 54~minutes on the DGX Spark GPU.
+The data quality experiment comparing FNO V1 ($R^2 = -77.15$ on a degenerate
+75K-row dataset with only 2{,}100 unique initial conditions) against FNO V2
+($R^2 = 1.000$ on 76{,}600 genuinely diverse LHS trajectories) demonstrates
+that data quality entirely dominates surrogate performance, independent of
+model architecture.
 
-  \item \textbf{Deployment is production-ready.}
-        TensorRT FP16 achieves p99~$= 0.046$~ms, $22\times$ under the 1~ms
-        SLA, at ${\approx}29{,}600$~queries/s — sufficient to serve multiple
-        plant instances simultaneously.
-\end{itemize}
+Finally, the TensorRT FP16 deployment path achieves p99 latency of
+0.046~ms --- $22\times$ under the 1~ms SLA --- at approximately
+29{,}600~queries/s, which is sufficient to serve multiple plant instances
+simultaneously on a single inference server.
 
-\textbf{Practitioner guidance.}
+\paragraph{Practitioner guidance.}
 The five engineering defects documented in Section~\ref{sec:bugs} are the
 most directly applicable contribution for practitioners integrating Modelica
 FMUs with RL training libraries.
 Three of the five (normalisation persistence, episode boundary detection,
-reward unit double-scaling) are not sCO$_2$-specific — they are latent
-failure modes in any FMU-Gym-SB3 integration, and existing frameworks
-(ModelicaGym, FMUGym, BOPTEST-Gym) do not address them.
-Additionally, the FNO-RL incompatibility finding provides concrete guidance:
+reward unit double-scaling) are not sCO$_2$-specific but are latent
+failure modes in any FMU-Gym-SB3 integration that existing frameworks
+(ModelicaGym, FMUGym, BOPTEST-Gym) do not address.
+Additionally, the FNO-RL incompatibility finding provides actionable guidance:
 FNO surrogates are excellent for physics-operator learning but require
-either causal masking during training or architectural replacement (e.g.\ MLP,
+either causal masking during training or architectural replacement (e.g., MLP,
 GRU, or causal FNO) before use in step-by-step RL loops.
 
-\textbf{Future work.}
-\begin{enumerate}
-  \item \textbf{Rebalanced curriculum allocation.}
-        Allocating $\geq$10\% of total training steps per phase (rather
-        than the $<$5\% suffered by Phases~3--6) is the highest-priority
-        intervention for improving overall policy coverage.
-        Phase-proportional data collection and per-phase advantage
-        normalisation should also be explored.
-
-  \item \textbf{FMU fine-tuning of MLP-trained policy.}
-        The MLP-trained policy serves as an excellent initialisation for
-        FMU fine-tuning.
-        500{,}000 fine-tuning steps on the live FMU should correct any
-        residual surrogate bias and bring performance to FMU-direct
-        levels while retaining the training speed advantages.
-
-  \item \textbf{Causal FNO for RL.}
-        Adding causal masking to the FNO's Fourier convolutions (so each
-        output step attends only to past inputs) would enable FNO-based RL
-        while retaining the operator's long-range temporal modelling capacity.
-
-  \item \textbf{Continual learning for multi-phase retention.}
-        Elastic weight consolidation~\cite{kirkpatrick2017ewc} or
-        progressive neural networks~\cite{rusu2016progressive} would allow
-        sequential phase deepening without catastrophic forgetting, without
-        requiring the careful replay scheduling needed by the interleaved
-        approach.
-
-  \item \textbf{Recompression topology.}
-        Extending to a full recompression Brayton cycle (adding a secondary
-        compressor and flow-split control) would bring the simulation closer
-        to utility-scale sCO$_2$ installations.
-
-  \item \textbf{Multi-objective deployment.}
-        Incorporating electricity price and grid frequency signals into
-        the reward function would enable economically optimal dispatch
-        — a necessary step for field deployment.
-\end{enumerate}
+\paragraph{Future work.}
+Several directions emerge from this work.
+The highest-priority intervention is rebalanced curriculum allocation,
+where allocating at least 10\% of total training steps per phase (rather
+than the $<$5\% suffered by Phases~3--6) should substantially improve
+overall policy coverage; phase-proportional data collection and per-phase
+advantage normalisation should also be explored.
+The MLP-trained policy serves as an excellent initialisation for FMU
+fine-tuning, and approximately 500{,}000 fine-tuning steps on the live
+FMU should correct any residual surrogate bias while retaining the training
+speed advantages.
+Adding causal masking to the FNO's Fourier convolutions would enable
+FNO-based RL while retaining the operator's long-range temporal modelling
+capacity.
+Continual learning techniques such as elastic weight
+consolidation~\cite{kirkpatrick2017ewc} or progressive neural
+networks~\cite{rusu2016progressive} would allow sequential phase deepening
+without catastrophic forgetting.
+Extending the model to a full recompression Brayton cycle topology (adding
+a secondary compressor and flow-split control) would bring the simulation
+closer to utility-scale sCO$_2$ installations.
+Finally, incorporating electricity price and grid frequency signals into
+the reward function would enable economically optimal dispatch, a necessary
+step for field deployment.
 
 %% ---------------------------------------------------------------------------

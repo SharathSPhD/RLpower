@@ -1,5 +1,11 @@
 \section{Method}
+\label{sec:method}
 %% ---------------------------------------------------------------------------
+
+This section details the algorithmic components of the sCO2RL framework:
+the composite reward function, Lagrangian constraint formulation,
+curriculum design, PID baseline methodology, and the Latin Hypercube
+dataset collection procedure for surrogate training.
 
 \subsection{Reward Function}
 
@@ -11,18 +17,18 @@ The reward decomposes into tracking, smoothness, and constraint terms:
   r_{\text{smooth}} &= -\|\Delta a_t\|^2 \;\cdot\; w_{\text{smooth}} \\
   r_{\text{constraint}} &= -\sum_i \lambda_i \cdot \mathbb{1}[\text{violation}_i]
 \end{align}
-where $W_{\text{net,MW}}$ is net shaft power in MW (converted from the FMU's
-SI watts by \texttt{FMPyAdapter}), $W_{\text{demand}}$ is the instantaneous
-demand setpoint, and $\lambda_i$ are the Lagrange multipliers updated online.
+where $W_{\text{net,MW}}$ is net shaft power in megawatts (converted from the
+FMU's SI watts by the unit-conversion layer in \texttt{FMPyAdapter}),
+$W_{\text{demand}}$ is the instantaneous demand setpoint set by the curriculum,
+and $\lambda_i$ are the Lagrangian multipliers updated online.
 
-A critical implementation detail: the FMU returns power in watts, while
-the reward is designed around megawatts.
-The \texttt{FMPyAdapter.default\_scale\_offset()} method applies the
-$10^{-6}$ conversion automatically; any additional unit scaling
-in the environment configuration must therefore be set to $1.0$.
-Failure to observe this leads to a double-scaling bug that reduces
-$r_{\text{track}}$ to order $10^{-6}$, effectively zeroing the reward signal
-(see Section~\ref{sec:bugs}).
+A critical implementation detail concerns unit consistency: the FMU returns
+power in watts, while the reward is designed around megawatts.
+The unit conversion is applied at the \texttt{FMPyAdapter} level;
+any additional scaling in the environment configuration must be set to $1.0$.
+Failure to observe this leads to Bug~3 (Section~\ref{sec:bugs}): a
+$10^{-6}$ double-scaling that collapses $r_{\text{track}}$ to machine-epsilon
+magnitude, effectively reducing the reward signal to pure noise.
 
 \subsection{Lagrangian Constraint Formulation}
 
@@ -31,39 +37,127 @@ $\lambda_i \geq 0$:
 \begin{equation}
   \mathcal{L}(\theta, \lambda) = J_r(\theta) - \sum_i \lambda_i \cdot J_{c_i}(\theta)
 \end{equation}
-where $J_r$ is the reward objective and $J_{c_i}$ is the expected cost.
+where $J_r$ is the reward objective and $J_{c_i}$ is the expected constraint
+cost over the policy $\pi_\theta$.
 Policy parameters $\theta$ are updated via gradient ascent on $\mathcal{L}$;
 multipliers $\lambda_i$ are updated via gradient ascent on $-\mathcal{L}$
-(dual ascent), increasing the penalty when violations occur and relaxing it
+(dual ascent), increasing the penalty when violations occur and decreasing it
 when the constraint is comfortably satisfied.
-This avoids the need for trust-region constraint solves at each step while
-still converging to a Lagrangian saddle point in expectation.
+This avoids trust-region constraint solves at each step while converging
+to a Lagrangian saddle point in expectation.
+
+The primary safety constraint is compressor inlet temperature:
+\begin{equation}
+  c_{\text{crit}}(s) = T_{\text{crit}} + 1\text{\textdegree{}C}
+                       - T_{\text{comp,in}}(s) \leq 0
+\end{equation}
+with $T_{\text{crit}} = 31.1$\textdegree{}C, so the guard is
+$T_{\text{comp,in}} \geq 32.1$\textdegree{}C.
+Dropping below 31.5\textdegree{}C triggers hard episode termination with
+reward $-100$ to prevent FMU solver divergence in the two-phase region.
 
 \subsection{Curriculum Phases}
 \label{sec:curriculum}
 
 \begin{table}[h]
 \centering
-\caption{Seven-phase curriculum design.}
+\caption{Seven-phase curriculum design.
+         Episode lengths reflect the time horizon needed for each scenario
+         to stabilise from a perturbed initial condition.
+         Advancement requires mean episode reward above the threshold over
+         a 50-episode rolling window, with constraint violation rate below 10\%.}
 \label{tab:curriculum}
-\begin{tabular}{clcc}
+\begin{tabular}{clcrc}
 \toprule
-Phase & Scenario & Episode length & Advance threshold \\
+Phase & Scenario & Steps & Length & Advance threshold \\
 \midrule
-0 & Steady-state optimisation & 120 steps & 8.0 reward \\
-1 & $\pm30\%$ gradual load following & 360 steps & 60.0 reward \\
-2 & $\pm10$\textdegree{}C ambient disturbance & 720 steps & 120.0 reward \\
-3 & EAF heat source transients & 1{,}080 steps & 250.0 reward \\
-4 & 50\% rapid load rejection (30~s) & 360 steps & 50.0 reward \\
-5 & Cold startup through critical region & 720 steps & 80.0 reward \\
-6 & Emergency turbine trip recovery & 1{,}200 steps & 300.0 reward \\
+0 & Steady-state optimisation & 120 & 10 min & 8.0 \\
+1 & $\pm30\%$ gradual load following & 360 & 30 min & 60.0 \\
+2 & $\pm10$\textdegree{}C ambient disturbance & 720 & 60 min & 120.0 \\
+3 & EAF heat source transients (200--1{,}200\textdegree{}C) & 1{,}080 & 90 min & 250.0 \\
+4 & 50\% rapid load rejection ($<$30~s) & 360 & 30 min & 50.0 \\
+5 & Cold startup through CO$_2$ critical region & 720 & 60 min & 80.0 \\
+6 & Emergency turbine trip recovery & 360 & 30 min & 300.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Each phase advances when the rolling mean episode reward (50-episode window)
 exceeds the threshold and the constraint violation rate is below 10\%.
-Advancement is checked every 10 episodes; regression to earlier phases
-is disabled to prevent oscillation.
+Phase advancement is checked every 10 episodes.
+Regression to earlier phases is disabled to prevent oscillation; instead,
+the agent accumulates training data at the current phase until it satisfies
+the advancement condition.
+
+The curriculum imposes progressively more extreme heat source variability
+and control challenges: Phase~0 tests convergence to a fixed setpoint;
+Phase~3 tests response to EAF-scale temperature transients with 1--15~minute
+cycle periods; Phase~6 tests emergency response to sudden turbine isolation
+with rapid inventory ejection under the Lagrangian constraint.
+
+\subsection{PID Baseline: Ziegler--Nichols Tuning}
+\label{sec:pid_tuning}
+
+The PID baseline uses four independent parallel controllers, each mapping
+one actuator to one process variable: the bypass valve controls turbine inlet
+temperature, the inlet guide vane (IGV) angle controls main compressor inlet
+temperature, the inventory valve position controls high-side pressure, and the
+cooling flow fraction controls precooler outlet temperature.
+
+Each controller implements a filtered derivative PID:
+\begin{equation}
+  u(t) = k_p \cdot e(t) + k_i \int_0^t e(\tau)\,d\tau
+         + k_d \frac{d e^*}{dt}(t)
+\end{equation}
+where $e^*(t)$ is the filtered error signal through a first-order low-pass
+filter with time constant $\tau_f$, preventing derivative kick on step inputs.
+
+The Ziegler--Nichols tuning procedure is applied to each PID channel as follows.
+A $10\%$ step input is applied to the corresponding actuator from the
+nominal setpoint while holding all other actuators constant.
+The step response is recorded and the process gain $K$, apparent dead time
+$L$ (intercept of the inflection-point tangent), and time constant $T$
+(tangent-axis crossing time minus $L$) are extracted.
+The ZN gains are computed as $k_p = \frac{1.2 T}{K L}$,
+$k_i = \frac{k_p}{2L}$, and $k_d = 0.5 k_p L$.
+All gains are derated by $0.4\times$ to compensate for the ZN tendency to
+produce oscillatory responses near stability limits in nonlinear systems.
+
+The inventory valve (high-side pressure control) showed negligible step
+response within the test window; manual gains were retained for that channel.
+ZN-derived gains are stored in \texttt{artifacts/pid\_tuning/pid\_gains.json}
+for reproducibility.
+
+\subsection{LHS Dataset Collection for FNO Surrogate}
+\label{sec:lhs_collection}
+
+FNO surrogate training requires diverse state-space coverage to generalise
+beyond the nominal operating point.
+Latin Hypercube Sampling (LHS) generates $N$ samples from a 5-dimensional
+initial-condition space (one dimension per actuator degree of freedom):
+\begin{equation}
+  \mathbf{x}_i^{(0)} \sim \text{LHS}(\mathbf{x}_{\min}, \mathbf{x}_{\max}, N=100{,}000)
+\end{equation}
+Each sample $\mathbf{x}_i^{(0)}$ initialises the FMU via \texttt{env.reset(options=\ldots)},
+guaranteeing that each trajectory starts from a genuinely distinct operating point.
+
+The LHS sampling scheme stratifies the $[0,1]^5$ unit hypercube into $N$
+equal-probability strata (one per dimension), selects one sample per stratum,
+and applies random shuffling to ensure uniformity without regularity artefacts.
+This is strictly superior to random uniform sampling for small-$N$ regimes:
+it guarantees no clustering and maximises coverage of the design space.
+
+The initial implementation contained a bug in \texttt{SCO2FMUEnv.reset()}: the
+\texttt{options} dictionary was accepted but not applied to the FMU initial
+condition, so all 75{,}000 trajectories started from the same default operating
+point.
+Inspection revealed only 2{,}100 unique initial-state rows --- the effective
+dataset size was 35$\times$ smaller than reported.
+After diagnosing and fixing the \texttt{reset()} LHS application, a new
+collection run was initiated targeting $100{,}000$ unique trajectories.
+FMU solver instability in extreme LHS operating points (CVODE NaN propagation
+in near-critical or high-turbine-inlet-temperature conditions) caused the
+run to terminate at $76{,}600$ trajectories (76.6\% of target), yielding
+3.98~GB of genuinely diverse training data.
 
 %% ---------------------------------------------------------------------------

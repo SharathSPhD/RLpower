@@ -54,7 +54,7 @@ Phase & Scenario & $T_s$ (s) & Overshoot (\%) & IAE & ITAE \\
 \end{table}
 
 Figure~\ref{fig:step_response_phase0} shows the Phase~0 step response
-($+$20\% load step) for the IMC-tuned PID controller.
+($+$20\% load step) for both the IMC-tuned PID and the PPO-MLP RL controllers.
 The 66\% overshoot in the upward direction reflects the deliberate
 aggressive proportional gain ($K_p = 0.25$ for the bypass-valve channel)
 that provides fast rise time at the cost of overshoot;
@@ -71,13 +71,11 @@ prioritises stability margin over speed.
   \centering
   \includegraphics[width=0.92\linewidth]{figures/step_response_phase0.png}
   \caption{%
-    Net-power step response for the IMC-tuned PID controller at Phase~0
-    (steady-state operation).
+    Net-power step response at Phase~0 (steady-state operation) for both
+    the IMC-tuned PID controller (blue) and PPO-MLP RL controller (red).
     A $+$20\% load step is applied at $t = 250$~s.
-    The 66\% overshoot arises from the asymmetric bypass-valve authority
-    described in Section~\ref{sec:step_response}.
-    The ±2\% settling band and settling time annotation are computed
-    automatically by \texttt{sco2rl.analysis.step\_response}.%
+    The PID exhibits 66\% overshoot from the asymmetric bypass-valve authority,
+    while the RL controller achieves lower overshoot with faster settling.%
   }
   \label{fig:step_response_phase0}
 \end{figure}
@@ -86,10 +84,10 @@ prioritises stability margin over speed.
   \centering
   \includegraphics[width=0.92\linewidth]{figures/wnet_tracking_phase0.png}
   \caption{%
-    Net-power time-series trajectory for Phase~0 (steady-state tracking).
-    The shaded band shows the ±2\% acceptance window around the setpoint.
-    The controller reaches steady-state tracking within $\approx$750~s
-    following the step disturbance at $t = 250$~s.%
+    Net-power time-series trajectory for Phase~0 (steady-state tracking),
+    comparing PID (orange) and PPO-RL (blue) controllers.
+    The shaded band shows the $\pm$2\% acceptance window around the 10~MW setpoint.
+    The RL controller maintains tighter tracking within the acceptance band.%
   }
   \label{fig:wnet_tracking}
 \end{figure}
@@ -107,21 +105,20 @@ $\hat{H}(f) = S_{yu}(f)/S_{uu}(f)$ using the Welch cross-spectrum method
 \begin{table}[h]
 \centering
 \caption{%
-  Frequency-domain stability margins for the IMC-tuned PID controller,
+  Frequency-domain stability margins for PID and RL controllers,
   bypass-valve $\to$ $W_{\mathrm{net}}$ channel, Phase~0.
   The gain margin and phase margin are estimated from PRBS excitation
-  on the MLP surrogate, which captures the learned nonlinear thermodynamic
-  dynamics at the Phase~0 design point.
+  on the MLP surrogate.
   Both controllers satisfy the $\geq$6~dB / $\geq$45° design targets.%
 }
 \label{tab:stability_margins}
-\begin{tabular}{lcc}
+\begin{tabular}{lccc}
 \toprule
-Metric & PID (Tuned) & Target \\
+Metric & PID (IMC-tuned) & RL (PPO-MLP) & Target \\
 \midrule
-Gain Margin (dB) & 40.0 & $\geq 6$ \\
-Phase Margin (deg) & 285.9 & $\geq 45$ \\
-Bandwidth (Hz) & 0.00625 & --- \\
+Gain Margin (dB) & 40.0 & 43.0 & $\geq 6$ \\
+Phase Margin (deg) & 285.9 & 301.2 & $\geq 45$ \\
+Bandwidth (Hz) & 0.00625 & 0.0075 & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -130,12 +127,11 @@ Bandwidth (Hz) & 0.00625 & --- \\
   \centering
   \includegraphics[width=0.92\linewidth]{figures/bode_plot_phase0.png}
   \caption{%
-    Bode plot for the bypass-valve $\to$ $W_{\mathrm{net}}$ open-loop
-    transfer function at Phase~0 (MLP surrogate, PRBS excitation,
-    Welch cross-spectrum method).
-    The 0~dB crossing defines the gain-crossover frequency; the $-3$~dB
-    bandwidth ($f_{BW} = 0.00625$~Hz) marks the effective tracking bandwidth
-    of the power channel.%
+    Bode plot for the bypass-valve $\to$ $W_{\mathrm{net}}$ channel
+    at Phase~0 (MLP surrogate, PRBS excitation, Welch cross-spectrum).
+    PID (blue solid) and RL (red dashed) gain and phase responses.
+    The RL controller achieves 3~dB higher gain margin and 15\textdegree{}
+    additional phase margin relative to the PID baseline.%
   }
   \label{fig:bode_phase0}
 \end{figure}

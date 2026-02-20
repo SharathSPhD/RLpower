@@ -6,13 +6,16 @@ Steel manufacturing accounts for approximately 7--8\% of global CO$_2$
 emissions~\cite{worldsteel2023}.
 Electric arc furnaces (EAF) and basic oxygen furnaces (BOF) expel exhaust
 streams that oscillate between 200\textdegree{}C and 1{,}200\textdegree{}C
-with cycle periods of 1--15 minutes — a transient heat source profile that
+with cycle periods of 1--15 minutes --- a transient heat source profile that
 makes conventional thermodynamic bottoming cycles impractical and power
 recovery control exceedingly difficult.
 Recovering this thermal energy via a power cycle could displace significant
 grid electricity; at 10~MWe per furnace cluster and typical steel mill
 electricity prices, the economic potential is several million USD per year
 per installation.
+Sathish et al.~\cite{sathish2019sco2whr} demonstrated the thermodynamic
+viability of sCO$_2$ Brayton cycles for steel plant waste heat recovery,
+motivating the present work on autonomous control.
 
 Supercritical CO$_2$ (sCO$_2$) Brayton cycles~\cite{dostal2004} are an
 attractive bottoming cycle for this application: operating above the CO$_2$
@@ -25,7 +28,7 @@ would be uneconomic.
 However, the fluid's near-critical thermodynamic properties introduce severe
 nonlinearity.
 Specific heat peaks at $c_p \approx 29.6$~kJ\,kg$^{-1}$\,K$^{-1}$ near
-35\textdegree{}C/80~bar — more than $10\times$ the ideal-gas value.
+35\textdegree{}C/80~bar --- more than $10\times$ the ideal-gas value.
 A 1.5\textdegree{}C compressor inlet temperature drop demands 6\% more
 cooling power, while the same temperature increase requires 18\% less:
 a strongly asymmetric gain that defeats fixed-gain PID tuning during furnace
@@ -40,35 +43,26 @@ trained on a physics-faithful digital twin can learn to anticipate and exploit
 thermodynamic nonlinearities without requiring an explicit analytical system
 model.
 Several key technical capabilities have matured that make this approach
-practical:
-\begin{itemize}
-  \item \textbf{FMU simulation}: The Functional Mockup Interface (FMI)
-        standard enables physics-faithful simulation at the speed required
-        for RL training. OpenModelica models of sCO$_2$ cycles can be
-        exported as FMI~2.0 Co-Simulation FMUs with embedded stiff solvers.
-
-  \item \textbf{MLP step-predictor surrogates}: A lightweight residual
-        MLP trained on $(s_t, a_t) \to s_{t+1}$ transitions enables
-        GPU-vectorised RL at 250{,}000~steps/s — over $300\times$ faster
-        than CPU FMU simulation — while maintaining sub-1\% state
-        prediction error.
-
-  \item \textbf{FNO physics operators}: Fourier Neural Operators~\cite{fno2021}
-        learn physics operator mappings with GPU-accelerated inference.
-        NVIDIA PhysicsNeMo provides production-grade GPU implementations
-        achieving $R^2 = 1.000$ on held-out trajectories; however, their
-        non-causal sequence-to-sequence architecture is incompatible with
-        step-by-step RL without architectural modifications.
-
-  \item \textbf{Lagrangian safe RL}: Constrained Policy Optimisation
-        variants~\cite{achiam2017cpo} with trainable Lagrangian multipliers
-        enforce operational constraints (compressor inlet temperature, surge
-        margin) throughout training and deployment.
-
-  \item \textbf{TensorRT deployment}: ONNX export followed by TensorRT FP16
-        compilation achieves sub-millisecond plant-edge inference latency,
-        satisfying real-time control requirements.
-\end{itemize}
+practical.
+First, the Functional Mockup Interface (FMI) standard enables physics-faithful
+simulation at the speed required for RL training, and OpenModelica models of
+sCO$_2$ cycles can be exported as FMI~2.0 Co-Simulation FMUs with embedded
+stiff solvers.
+Second, a lightweight residual MLP trained on $(s_t, a_t) \to s_{t+1}$
+transitions enables GPU-vectorised RL at 250{,}000~steps/s --- over
+$300\times$ faster than CPU FMU simulation --- while maintaining sub-1\%
+state prediction error.
+Third, Fourier Neural Operators~\cite{fno2021} learn physics operator mappings
+with GPU-accelerated inference; NVIDIA PhysicsNeMo provides production-grade
+GPU implementations achieving $R^2 = 1.000$ on held-out trajectories, although
+the non-causal sequence-to-sequence architecture is incompatible with
+step-by-step RL without architectural modifications (Section~\ref{sec:fno_surrogate}).
+Fourth, Constrained Policy Optimisation variants~\cite{achiam2017cpo} with
+trainable Lagrangian multipliers enforce operational constraints (compressor
+inlet temperature, surge margin) throughout training and deployment.
+Finally, ONNX export followed by TensorRT FP16 compilation achieves
+sub-millisecond plant-edge inference latency, satisfying real-time control
+requirements.
 
 Related work has demonstrated RL on building energy systems via
 Modelica/FMU environments~\cite{modelicagym,boptestgym}, and on organic
@@ -80,9 +74,13 @@ The EU-funded iSOP doctoral network (Horizon Europe grant 101073266) trains
 15 researchers specifically on sCO$_2$ transient modelling and novel control
 strategies~\cite{isop2024}, underscoring community recognition of this
 unsolved control problem.
+Sathish et al.~\cite{sathish2024aif} have also proposed active inference as
+an alternative advanced control paradigm for centrifugal compressor surge
+control, demonstrating the broader trend towards intelligent, adaptive control
+in turbomachinery applications.
 
-Despite this growing interest, to our knowledge no publicly available framework
-combines (i)~a physics-faithful OpenModelica-exported sCO$_2$ FMU,
+Despite this growing interest, to the authors' knowledge no publicly available
+framework combines (i)~a physics-faithful OpenModelica-exported sCO$_2$ FMU,
 (ii)~structured curriculum RL with Lagrangian safety constraints,
 (iii)~an MLP step-predictor surrogate enabling 250{,}000~steps/s GPU training,
 (iv)~an NVIDIA PhysicsNeMo FNO surrogate path ($R^2 = 1.000$), and
@@ -90,40 +88,47 @@ combines (i)~a physics-faithful OpenModelica-exported sCO$_2$ FMU,
 sCO2RL fills this gap with a fully open-source implementation targeting the
 waste heat recovery application.
 
-\textbf{Contributions.}
-\begin{enumerate}
-  \item A publicly available Gymnasium environment wrapping an
-        OpenModelica-exported sCO$_2$ FMU with 14~observation variables,
-        4~actuator channels, a 7-phase structured curriculum,
-        and Lagrangian safety constraints enforcing operation above the CO$_2$
-        critical point.
+The contributions of this work are sixfold.
+The first contribution is a publicly available Gymnasium environment wrapping
+an OpenModelica-exported sCO$_2$ FMU with 14~observation variables,
+4~actuator channels, a 7-phase structured curriculum, and Lagrangian safety
+constraints enforcing operation above the CO$_2$ critical point.
+Second, the paper demonstrates that PPO with Lagrangian constraints achieves
+$+30$--$39\%$ cumulative episode reward improvement over Ziegler--Nichols-tuned
+PID in steady-state and mild-transient scenarios (Phases~0--2), with zero
+safety violations across 140~evaluation episodes.
+Third, an MLP step-predictor surrogate (residual MLP, 4~layers, 512 hidden
+units, trained on 55{,}000{,}000 $(s,a,s')$ transitions) enables
+GPU-vectorised PPO at 250{,}000~steps/s, achieving 18.5$\times$ lower
+net-power tracking error than the PID baseline in 23~minutes of training.
+Fourth, the integration of NVIDIA PhysicsNeMo FNO surrogate training with
+76{,}600 unique Latin Hypercube-sampled FMU trajectories ($R^2 = 1.000$)
+is presented, along with empirical characterisation of both the data quality
+failure mode causing surrogate fidelity collapse ($R^2 = -77$) under
+dataset degeneracy and the FNO's architectural incompatibility with
+step-by-step RL prediction.
+Fifth, a TensorRT-FP16 deployment path achieving p99 inference latency
+of 0.046~ms --- $22\times$ under the 1~ms plant-edge SLA --- is demonstrated.
+Sixth, a detailed diagnosis of five non-algorithmic training infrastructure
+defects encountered in practice is provided, covering observation normalisation
+persistence, episode boundary detection, reward unit double-scaling, stale
+disturbance profiles, and constraint-violation gating, as practitioner guidance
+for the FMU-RL integration community.
 
-  \item Demonstration that PPO with Lagrangian constraints achieves
-        $+30$--$39\%$ cumulative episode reward improvement over
-        Ziegler--Nichols-tuned PID in steady-state and mild-transient
-        scenarios (Phases~0--2), with \textbf{zero} safety violations across
-        140~evaluation episodes.
-
-  \item An MLP step-predictor surrogate (residual MLP, 4~layers, 512 hidden
-        units, trained on 55{,}000{,}000 $(s,a,s')$ transitions) enabling
-        GPU-vectorised PPO at 250{,}000~steps/s, achieving 18.5$\times$ lower
-        net-power tracking error than the PID baseline in 23~minutes of training.
-
-  \item Integration of NVIDIA PhysicsNeMo FNO surrogate training with
-        76{,}600 unique Latin Hypercube-sampled FMU trajectories ($R^2 = 1.000$),
-        with empirical characterisation of the data quality failure mode
-        causing surrogate fidelity collapse ($R^2 = -77$) under
-        dataset degeneracy, \emph{and} the FNO's architectural incompatibility
-        with step-by-step RL prediction.
-
-  \item A TensorRT-FP16 deployment path achieving p99 inference latency
-        of 0.046~ms, $22\times$ under the 1~ms plant-edge SLA.
-
-  \item A detailed diagnosis of five non-algorithmic training infrastructure
-        defects encountered in practice — covering observation normalisation
-        persistence, episode boundary detection, reward unit double-scaling,
-        stale disturbance profiles, and constraint-violation gating — as
-        practitioner guidance for the FMU-RL integration community.
-\end{enumerate}
+The remainder of this paper is organised as follows.
+Section~\ref{sec:related} reviews related work on sCO$_2$ cycle control,
+reinforcement learning for thermodynamic systems, and FMU-based training
+environments.
+Section~\ref{sec:architecture} describes the system architecture, including
+the physics simulation layer, Gymnasium environment, and surrogate models.
+Section~\ref{sec:method} details the reward function, Lagrangian constraint
+formulation, curriculum design, and PID baseline methodology.
+Section~\ref{sec:results} presents experimental results for both the
+FMU-direct and MLP surrogate training paths.
+Section~\ref{sec:control_analysis} provides a control-theoretic analysis
+comparing RL and PID controllers.
+Section~\ref{sec:bugs} documents five practitioner-relevant engineering
+defects, and Section~\ref{sec:conclusion} concludes with key findings and
+future work.
 
 %% ---------------------------------------------------------------------------
