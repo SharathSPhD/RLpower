@@ -12,7 +12,7 @@ The surrogate modelling layer accelerates training throughput by replacing
 the computationally expensive FMU with learned approximations, enabling
 GPU-vectorised policy optimisation.
 
-\begin{figure}[t]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.95\linewidth]{figures/system_architecture.png}
   \caption{%
@@ -28,7 +28,7 @@ GPU-vectorised policy optimisation.
   \label{fig:system_architecture}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.90\linewidth]{figures/cycle_diagram.png}
   \caption{%
@@ -46,13 +46,15 @@ GPU-vectorised policy optimisation.
   \label{fig:cycle_schematic}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.78\linewidth]{figures/cycle_ts_diagram.png}
   \caption{%
-    CO$_2$ temperature-entropy (T-s) diagram showing the saturation dome
-    (blue), reference state points at the design operating point, and the
-    critical-temperature and minimum-compressor-inlet constraints (dashed red).
+    Representative CO$_2$ temperature-entropy (T-s) diagram for the
+    simple recuperated sCO$_2$ Brayton cycle
+    (adapted from reference cycle analysis).
+    The saturation dome, isobars, and cycle state points (1--5) are shown
+    together with the critical-temperature constraint region.
     Near-critical specific heat peaks ($c_p\!\approx\!29.6$~kJ/(kg$\cdot$K)
     at 35\textdegree{}C/80~bar) create the asymmetric nonlinearity that
     motivates RL control.%
@@ -206,7 +208,7 @@ outputs are unreliable despite $R^2 = 1.000$ on full trajectories.
 The MLP step predictor resolves this by design: it is explicitly trained and
 evaluated on single-step $(s, a) \to s'$ prediction.
 
-\begin{figure}[t]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.95\linewidth]{figures/training_pipeline.png}
   \caption{%

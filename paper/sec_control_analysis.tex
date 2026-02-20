@@ -67,7 +67,7 @@ the 20--60~s thermal time constants of the sCO$_2$ inventory and temperature
 channels — the IMC tuning parameter $\lambda = 0.5\tau$ intentionally
 prioritises stability margin over speed.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.92\linewidth]{figures/step_response_phase0.png}
   \caption{%
@@ -80,7 +80,7 @@ prioritises stability margin over speed.
   \label{fig:step_response_phase0}
 \end{figure}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.92\linewidth]{figures/wnet_tracking_phase0.png}
   \caption{%
@@ -95,54 +95,29 @@ prioritises stability margin over speed.
 \subsection{Frequency Response and Stability Margins}
 \label{sec:freq_response}
 
-Frequency response is estimated using Pseudo-Random Binary Sequence (PRBS)
-excitation injected onto the bypass-valve action channel while the PID
-controller operates at the rated operating point~\cite{ljung1999system}.
-The empirical transfer function estimate (ETFE) is computed as
-$\hat{H}(f) = S_{yu}(f)/S_{uu}(f)$ using the Welch cross-spectrum method
-(\texttt{scipy.signal.csd}) over a frequency range of 0.001--0.05~Hz.
+Frequency-domain characteristics are estimated by computing the FFT of the
+step response time series from the MLP surrogate control analysis.
+This approach provides insight into the frequency content of the
+closed-loop dynamics, complementing the time-domain step response
+metrics~\cite{ljung1999system}.
 
-\begin{table}[h]
-\centering
-\caption{%
-  Frequency-domain stability margins for PID and RL controllers,
-  bypass-valve $\to$ $W_{\mathrm{net}}$ channel, Phase~0.
-  The gain margin and phase margin are estimated from PRBS excitation
-  on the MLP surrogate.
-  Both controllers satisfy the $\geq$6~dB / $\geq$45° design targets.%
-}
-\label{tab:stability_margins}
-\begin{tabular}{lccc}
-\toprule
-Metric & PID (IMC-tuned) & RL (PPO-MLP) & Target \\
-\midrule
-Gain Margin (dB) & 40.0 & 43.0 & $\geq 6$ \\
-Phase Margin (deg) & 285.9 & 301.2 & $\geq 45$ \\
-Bandwidth (Hz) & 0.00625 & 0.0075 & --- \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.92\linewidth]{figures/bode_plot_phase0.png}
   \caption{%
     Bode plot for the bypass-valve $\to$ $W_{\mathrm{net}}$ channel
-    at Phase~0 (MLP surrogate, PRBS excitation, Welch cross-spectrum).
-    PID (blue solid) and RL (red dashed) gain and phase responses.
-    The RL controller achieves 3~dB higher gain margin and 15\textdegree{}
-    additional phase margin relative to the PID baseline.%
+    at Phase~0 (MLP surrogate).
+    Frequency content derived from the FFT of the step response data.
+    PID (blue solid) and RL (red dashed) magnitude and phase responses.%
   }
   \label{fig:bode_phase0}
 \end{figure}
 
-The IMC-tuned gains provide substantial stability margins on the MLP
-surrogate, exceeding the design specifications.
-The PRBS-estimated Bode data captures the learned nonlinear bypass-valve
-to net-power dynamics including pressure-temperature coupling effects.
-The RL controller implicitly learns these multi-channel dynamics through
-its trained policy network, which explains its superior transient tracking
-performance compared to the decoupled PID architecture.
+The RL controller implicitly learns the multi-channel bypass-valve
+to net-power dynamics including pressure-temperature coupling effects
+through its trained policy network, which explains its superior transient
+tracking performance compared to the decoupled PID architecture in
+Phases~0--2.
 
 \subsection{Cross-Phase Disturbance Characterisation}
 \label{sec:disturbance}
@@ -155,7 +130,7 @@ scenarios: the PID decoupled-loop architecture does not account for
 cross-channel interactions between the bypass-valve, IGV, and inventory-valve
 channels under rapid transients.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.95\linewidth]{figures/control_metrics_heatmap.png}
   \caption{%

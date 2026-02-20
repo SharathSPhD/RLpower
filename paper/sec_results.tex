@@ -46,7 +46,7 @@ evaluation performance (discussed in Section~\ref{subsec:phase_results}).
 Figure~\ref{fig:training_curve} shows the training reward progression
 across the full 5M-step run.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.92\linewidth]{figures/training_curve.png}
   \caption{%
@@ -139,7 +139,7 @@ This decoupling of safety from reward demonstrates that safety invariants
 are maintained robustly regardless of policy quality, a key property
 for deployment in industrial environments.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.92\linewidth]{figures/phase_rewards.png}
   \caption{%
@@ -151,7 +151,7 @@ for deployment in industrial environments.
   \label{fig:phase_rewards}
 \end{figure}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.92\linewidth]{figures/phase_improvement.png}
   \caption{%
@@ -257,21 +257,19 @@ constraint enforcement.
 Net power converges to near-rated levels under mid- and high-exhaust conditions
 and partially recovers under low exhaust ($<$400\textdegree{}C), where the
 available heat input genuinely limits output.
-The thermal efficiency stabilises at 35--42\% at design exhaust conditions,
-consistent with the simple recuperated cycle's theoretical 40\% peak efficiency.
 Notably, the RL policy exploits the asymmetric nonlinearity near the CO$_2$
 critical point by preferentially maintaining compressor inlet temperature
 2--4\textdegree{}C above the critical threshold, trading some efficiency for
 increased operational stability margin.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.96\linewidth]{figures/thermo_trajectories.png}
   \caption{%
     Thermodynamic state trajectories for four curriculum scenarios evaluated
     with the 5M-step FMU-direct policy.
     Panels show compressor inlet temperature, turbine inlet temperature,
-    net power output, and cycle efficiency.
+    and net power output.
     The Lagrangian constraint floor ($T_{\text{comp,in}} > 32.1$\textdegree{}C)
     is marked by the dashed red line in the compressor inlet panel.%
   }
@@ -330,7 +328,7 @@ entirely dominates FNO performance.
 Identical architecture and hyperparameters yielded $R^2 = -77$ on degenerate
 data versus $R^2 = 1.000$ on diverse data --- a qualitative phase transition.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.82\linewidth]{figures/fidelity_rmse.png}
   \caption{%
@@ -418,7 +416,7 @@ $Q_{\text{in}}$        & $0.0370$ & MW             & Excellent \\
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.88\linewidth]{figures/mlp_surrogate_accuracy.png}
   \caption{%
@@ -448,7 +446,7 @@ over the last 100 episodes, best $+26.4$).
 The 250{,}000~steps/s throughput (versus ${\approx}800$~steps/s on the
 CPU FMU path) represents a ${\approx}312\times$ speedup for this phase of training.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.88\linewidth]{figures/ppo_mlp_learning_curve.png}
   \caption{%
@@ -496,7 +494,7 @@ PPO (RL agent) & $+27.1 \pm 7.8$ & $9.878 \pm 0.035$  & $\mathbf{0.122}$ & $\mat
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.96\linewidth]{figures/ppo_vs_pid_comparison.png}
   \caption{%
@@ -507,7 +505,7 @@ PPO (RL agent) & $+27.1 \pm 7.8$ & $9.878 \pm 0.035$  & $\mathbf{0.122}$ & $\mat
   \label{fig:ppo_pid_comparison}
 \end{figure}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.92\linewidth]{figures/wnet_tracking_mlp.png}
   \caption{%
@@ -537,7 +535,7 @@ thermodynamic property calculations from the evaluated state data.
 Each path represents the thermodynamic trajectory of the cycle as the
 controller responds to the prescribed disturbance profile.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.95\linewidth]{figures/ts_diagram_scenarios_composite.png}
   \caption{%
@@ -608,7 +606,7 @@ The p99 latency of 0.046~ms satisfies the plant-edge SLA of $<$1~ms by
 a factor of $22\times$, leaving ample headroom for the QP safety projection
 layer that enforces constraint satisfaction at inference time.
 
-\begin{figure}[h]
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.75\linewidth]{figures/latency_summary.png}
   \caption{TensorRT FP16 inference latency percentiles.
