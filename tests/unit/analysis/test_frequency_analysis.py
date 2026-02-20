@@ -13,6 +13,23 @@ from sco2rl.analysis.frequency_analysis import (
 from sco2rl.analysis.scenario_runner import build_mock_env, build_mock_pid
 
 
+class MockRLPolicy:
+    """Minimal RL-compatible policy for testing.
+
+    Always outputs zero action vector.  No SB3 dependency required.
+    """
+
+    @property
+    def name(self) -> str:
+        return "RL"
+
+    def predict(self, obs: np.ndarray, deterministic: bool = True):
+        return np.zeros(4, dtype=np.float32), None
+
+    def reset(self) -> None:
+        pass
+
+
 # ─── generate_prbs ────────────────────────────────────────────────────────────
 
 
@@ -176,3 +193,41 @@ def test_freq_response_margins_finite(dynamic_env, mock_pid):
         assert np.isfinite(result.gain_margin_db)
         assert np.isfinite(result.phase_margin_deg)
         assert np.isfinite(result.bandwidth_hz)
+
+
+# ─── MockRLPolicy tests ────────────────────────────────────────────────────────
+
+
+def test_freq_response_with_rl_policy(dynamic_env):
+    """estimate_frequency_response must work with any policy-like object (not just PID)."""
+    from sco2rl.analysis.metrics import FrequencyResponseResult
+    rl = MockRLPolicy()
+    result = estimate_frequency_response(
+        env=dynamic_env,
+        policy=rl,
+        channel_idx=0,
+        output_variable="W_net",
+        prbs_amplitude=0.05,
+        n_bits=7,
+        n_periods=3,
+        dt=5.0,
+        warmup_steps=20,
+        phase=0,
+    )
+    assert isinstance(result, FrequencyResponseResult)
+    assert result.controller == "RL"
+    assert len(result.frequencies_hz) > 0
+    assert len(result.magnitude_db) == len(result.frequencies_hz)
+    assert len(result.phase_deg) == len(result.frequencies_hz)
+    assert np.isfinite(result.gain_margin_db)
+    assert np.isfinite(result.phase_margin_deg)
+
+
+def test_freq_response_controller_name_rl(dynamic_env):
+    """FrequencyResponseResult.controller must reflect the RL policy name."""
+    rl = MockRLPolicy()
+    result = estimate_frequency_response(
+        env=dynamic_env, policy=rl,
+        channel_idx=0, n_bits=7, n_periods=3, warmup_steps=20,
+    )
+    assert result.controller == "RL"

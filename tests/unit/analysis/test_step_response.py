@@ -8,6 +8,23 @@ from sco2rl.analysis.step_response import compute_step_metrics, run_step_scenari
 from sco2rl.analysis.scenario_runner import build_mock_env, build_mock_pid
 
 
+class MockRLPolicy:
+    """Minimal RL-compatible policy for testing.
+
+    Always outputs zero action vector.  No SB3 dependency required.
+    """
+
+    @property
+    def name(self) -> str:
+        return "RL"
+
+    def predict(self, obs: np.ndarray, deterministic: bool = True):
+        return np.zeros(4, dtype=np.float32), None
+
+    def reset(self) -> None:
+        pass
+
+
 # ─── compute_step_metrics ─────────────────────────────────────────────────────
 
 
@@ -178,3 +195,64 @@ def test_run_step_different_phases(mock_pid):
     # All should produce valid results
     for phase, res in results.items():
         assert len(res.response) > 0, f"Phase {phase} has empty response"
+
+
+# ─── MockRLPolicy tests ────────────────────────────────────────────────────────
+
+
+def test_run_step_scenario_with_rl_policy(mock_env):
+    """run_step_scenario must work with any policy-like object (not just PID)."""
+    from sco2rl.analysis.metrics import StepResponseResult
+    rl = MockRLPolicy()
+    result = run_step_scenario(
+        env=mock_env,
+        policy=rl,
+        step_magnitude=2.0,
+        step_at_step=15,
+        n_steps=60,
+        dt=5.0,
+        variable="W_net",
+        phase=0,
+        scenario="step_load_up",
+    )
+    assert isinstance(result, StepResponseResult)
+    assert result.controller == "RL"
+    assert len(result.response) > 0
+    assert len(result.time_s) == len(result.response)
+    for field_name in ["iae", "ise", "itae", "overshoot_pct", "settling_time_s"]:
+        assert np.isfinite(getattr(result, field_name)), f"{field_name} is not finite"
+
+
+def test_rl_and_pid_produce_different_trajectories(mock_pid):
+    """RL mock (zero action) and PID (computed action) must yield different trajectories."""
+    rl = MockRLPolicy()
+    env_pid = build_mock_env(dynamic=False)
+    env_rl = build_mock_env(dynamic=False)
+    try:
+        res_pid = run_step_scenario(
+            env=env_pid, policy=mock_pid,
+            step_magnitude=2.0, step_at_step=10, n_steps=60, dt=5.0,
+        )
+        res_rl = run_step_scenario(
+            env=env_rl, policy=rl,
+            step_magnitude=2.0, step_at_step=10, n_steps=60, dt=5.0,
+        )
+    finally:
+        env_pid.close()
+        env_rl.close()
+    # Responses must be non-identical: PID computes non-zero actions, RL outputs zeros
+    min_len = min(len(res_pid.response), len(res_rl.response))
+    assert min_len > 0
+    pid_arr = np.array(res_pid.response[:min_len])
+    rl_arr = np.array(res_rl.response[:min_len])
+    assert not np.allclose(pid_arr, rl_arr), "PID and zero-RL should produce different trajectories"
+
+
+def test_step_result_controller_name_rl(mock_env):
+    """StepResponseResult.controller must reflect the RL policy name."""
+    rl = MockRLPolicy()
+    result = run_step_scenario(
+        env=mock_env, policy=rl,
+        step_magnitude=1.0, step_at_step=10, n_steps=40, dt=5.0,
+    )
+    assert result.controller == "RL"
