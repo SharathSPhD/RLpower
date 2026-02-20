@@ -133,8 +133,14 @@ class TorchBatchedSurrogateEnv(gym.vector.VectorEnv):
         self._act_range = (self._act_phys_max - self._act_phys_min).clamp_min(1e-9)
         self._rate_limits = torch.tensor(rate_limits, device=self._device)
 
+        # Design-point defaults to physical midpoint so initial state is well
+        # inside the safety envelope regardless of obs_lo magnitudes.
         dp = config.get("obs_design_point", {})
-        design_point = np.array([dp.get(v, 0.5) for v in self._obs_vars], dtype=np.float32)
+        design_point = np.array(
+            [float(dp.get(v, (lo + hi) * 0.5))
+             for v, lo, hi in zip(self._obs_vars, obs_lo, obs_hi)],
+            dtype=np.float32,
+        )
         self._design_point = torch.tensor(design_point, device=self._device)
 
         single_obs_dim = self._n_obs * self._history_steps
