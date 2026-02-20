@@ -1,44 +1,125 @@
 \section{Related Work}
+\label{sec:related}
 %% ---------------------------------------------------------------------------
 
-\subsection{RL for Thermodynamic Cycle Control}
+\subsection{sCO$_2$ Cycle Modelling and Control}
 
-Deep RL has been applied to related thermodynamic control problems.
-Wang et al.~\cite{wang2020orc} demonstrated that a soft actor-critic agent
+Supercritical CO$_2$ Brayton cycles have attracted extensive modelling
+and control research since Dostál et al.'s foundational study~\cite{dostal2004}.
+Conventional control for sCO$_2$ cycles relies on multi-loop PID
+architectures~\cite{sco2compare2021}; however, the strongly nonlinear
+thermophysical properties near the critical point (specific heat diverges
+to ${\approx}30$~kJ/(kg$\cdot$K) at 35\textdegree{}C, 80~bar) defeat
+fixed-gain controllers during large transients.
+Dyreby et al.~\cite{sco2compare2021} compare proportional-integral,
+feedforward, and combined strategies for recompression cycle load-following,
+establishing the classical control performance envelope that motivates
+data-driven alternatives.
+
+For the WHR application specifically, the intermittent EAF/BOF exhaust
+profile (200--1{,}200\textdegree{}C, 1--15~min cycles) imposes transients
+that are qualitatively more severe than the load-following scenarios considered
+in most sCO$_2$ control literature.
+The EU-funded iSOP doctoral network (Horizon Europe grant~101073266) trains
+15 researchers on sCO$_2$ transient modelling and control~\cite{isop2024},
+underscoring community recognition of the unsolved control challenge.
+
+\subsection{Data-Driven and Machine Learning Control for sCO$_2$}
+
+Machine learning approaches for sCO$_2$ control are nascent.
+Zhu et al.~\cite{zhu2024fno} apply Fourier Neural Operators (FNO) to
+characterise open-loop transient dynamics of a sCO$_2$ cycle and embed the
+learned model in a Model Predictive Controller, demonstrating non-minimum
+phase behaviour in the printed circuit heat exchanger outlet temperature
+that defeats simple PI feedback — precisely the scenario our RL curriculum
+is designed to handle via the Phase~3 EAF transient scenario.
+Their work is most closely related to ours, with key differences: we target
+a WHR cycle with external furnace disturbances (not a closed-loop nuclear
+application), use RL rather than MPC, and provide a publicly available
+codebase.
+
+\subsection{Reinforcement Learning for Thermodynamic Power Cycles}
+
+RL has been applied to related thermodynamic control problems across organic
+Rankine cycle (ORC) and HVAC domains.
+Wang et al.~\cite{wang2020orc} demonstrate that a soft actor-critic agent
 outperforms PID control for ORC superheat regulation under highly transient
-internal combustion engine exhaust, achieving superior generalisation to
-unseen disturbance profiles.
-A 2022 study on sCO$_2$ recompression cycle control~\cite{sco2compare2021}
-compared multiple conventional control strategies (PI, feedforward, combined)
-during load-following transients, establishing the baseline landscape that RL
-must surpass.
+ICE exhaust, achieving superior generalisation to unseen disturbance profiles
+— a result analogous to our Phase~0--2 findings.
+BOPTEST-Gym~\cite{boptestgym} provides a standardised benchmark for RL in
+building HVAC systems using FMU simulation, and its benchmarking methodology
+has informed our evaluation protocol design.
+OpenModelica-Microgrid-Gym~\cite{ommicrogrid} applies RL to electrical
+microgrids, demonstrating that physics-faithful OpenModelica FMUs can train
+viable RL policies in power systems contexts.
 
-For the sCO$_2$ cycle specifically, Zhu et al.~\cite{zhu2024fno} recently
-applied Fourier Neural Operators to characterise open-loop transient dynamics
-and embed the learned model in a Model Predictive Controller, demonstrating
-that the printed circuit heat exchanger outlet temperature exhibits non-minimum
-phase characteristics that defeat simple PI feedback — precisely the scenario
-our RL curriculum is designed to handle.
+To our knowledge, no prior work applies deep RL with structured curriculum
+learning and Lagrangian safety constraints to sCO$_2$ Brayton cycle WHR control.
 
 \subsection{FMU-Based RL Environments}
 
-ModelicaGym~\cite{modelicagym} provides a Gym wrapper for Modelica FMUs
-validated on Cart-Pole.
-BOPTEST-Gym~\cite{boptestgym} targets building HVAC systems with FMU
-simulation; its benchmarking framework informs our evaluation approach.
-FMUGym~\cite{fmugym} and OpenModelica-Microgrid-Gym~\cite{ommicrogrid}
-cover electrical power networks.
-None of these frameworks address thermodynamic power cycles, curriculum
-learning, or Lagrangian safety constraints.
-
-\subsection{Lagrangian Safe RL}
-
-Constrained Policy Optimisation (CPO)~\cite{achiam2017cpo} established
-the theoretical foundation for policy search with hard constraints.
-Our Lagrangian relaxation approach maintains trainable multipliers
-$\lambda_c \geq 0$ updated via gradient ascent on the constraint dual,
-providing a practical implementation that does not require trust-region
-solves at each step while still converging to constraint satisfaction in
+Several frameworks have standardised the FMU-Gymnasium interface.
+ModelicaGym~\cite{modelicagym} provides a Gym wrapper for Modelica FMUs,
+validated on Cart-Pole, establishing the basic integration pattern adopted
+by later frameworks.
+FMUGym~\cite{fmugym} extends this with uncertainty injection for robustness
 training.
+BOPTEST-Gym~\cite{boptestgym} targets building HVAC optimisation, providing
+standardised evaluation protocols that have been adopted by the HVAC RL
+community.
+None of these frameworks address thermodynamic power cycle control,
+7-phase curriculum learning, or Lagrangian safety enforcement.
+
+A critical practical gap in all existing FMU-RL frameworks, documented in
+detail in Section~\ref{sec:bugs}: none address observation normalisation
+persistence across checkpoint restarts, episode boundary alignment for
+multi-step FMU solvers, or reward unit double-scaling arising from FMU
+SI-unit conventions.
+These defects are latent in any FMU-SB3 integration and can render training
+completely ineffective without surfacing obvious error messages.
+
+\subsection{FNO Surrogate Models and NVIDIA PhysicsNeMo}
+
+Fourier Neural Operators~\cite{fno2021} learn mappings between function
+spaces, making them well-suited for surrogate modelling of PDE-governed
+systems such as thermodynamic cycles.
+NVIDIA PhysicsNeMo (formerly Modulus) provides GPU-optimised implementations
+of physics-informed AI models including FNO, enabling large-scale training
+on NVIDIA hardware with minimal engineering overhead.
+Our work integrates PhysicsNeMo's FNO implementation into the RL surrogate
+pipeline, demonstrating both the practical benefits (simple API, GPU
+utilisation) and the data quality requirements (dataset degeneracy causes
+catastrophic surrogate failure regardless of architecture quality).
+
+\subsection{Catastrophic Forgetting in Curriculum RL}
+
+The catastrophic forgetting of earlier curriculum phases during Phase~6
+specialisation is a manifestation of the interference problem first
+characterised by McCloskey and Cohen~\cite{mccloskey1989}.
+In the deep learning context, Kirkpatrick et al.~\cite{kirkpatrick2017ewc}
+introduced Elastic Weight Consolidation (EWC) to selectively protect
+previously learned task parameters.
+Progressive neural networks~\cite{rusu2016progressive} offer a structural
+solution by freezing earlier task columns and adding lateral connections
+for new tasks.
+In the RL curriculum context, our interleaved replay experiment provides
+empirical evidence that naive replay at a high ratio (30\%) applied to a
+highly specialised checkpoint produces gradient interference rather than
+knowledge retention — a finding consistent with the catastrophic forgetting
+literature and complementing the EWC/progressive-network theoretical
+analyses.
+
+\subsection{Safe RL}
+
+Constrained Policy Optimisation (CPO)~\cite{achiam2017cpo} established the
+theoretical foundation for policy search with hard safety constraints.
+Our Lagrangian relaxation approach maintains trainable multipliers
+$\lambda_c \geq 0$ updated via gradient ascent on the constraint dual —
+a practical variant that avoids trust-region constraint solves at each step
+while converging to constraint satisfaction in expectation.
+The empirical zero-violation results across 210 evaluation episodes
+(including phases where the policy has received minimal training) confirm
+that the Lagrangian mechanism is robust enough to serve as a safety backstop
+even when reward performance degrades substantially.
 
 %% ---------------------------------------------------------------------------

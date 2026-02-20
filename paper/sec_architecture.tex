@@ -115,13 +115,34 @@ recovery with rapid load rejection).
 Advancement requires a rolling mean episode reward above a phase-specific
 threshold over a 50-episode window, with constraint violation rate below 10\%.
 
-\subsection{Surrogate Model}
+\subsection{Surrogate Model: NVIDIA PhysicsNeMo FNO}
 
-The FNO~\cite{fno2021} is a 1-D operator learning model that maps
-$(s_t, a_t) \mapsto s_{t+1}$ in normalised coordinates.
-Architecture: 4~Fourier layers, 64~modes, 128~width, GELU activation.
-After GPU-surrogate training, 500K fine-tuning steps on the live FMU
-correct surrogate bias.
+The Fourier Neural Operator~\cite{fno2021} is implemented using
+\textbf{NVIDIA PhysicsNeMo}~\cite{physicsnemo2023} (\texttt{nvidia-physicsnemo}
+package, import path \texttt{physicsnemo.models.fno.FNO}), a physics-informed
+AI framework from NVIDIA Research providing GPU-optimised operator learning
+implementations.
+
+The surrogate maps a sequence of $(s_t, a_t)$ pairs to a sequence of
+$(s_{t+1})$ predictions in normalised coordinates:
+\begin{equation}
+  \hat{s}_{1:T} = \text{FNO}(\,[s_0, a_0],\, [s_1, a_1],\, \ldots,\, [s_{T-1}, a_{T-1}]\,)
+\end{equation}
+Architecture: $d_{\text{in}} = 18$ (14 obs + 4 actions), $d_{\text{out}} = 14$,
+spectral modes = 64, channel width = 128, 4~Fourier layers, GELU activation,
+546{,}190 parameters.
+Per-variable z-score normalisation is applied before training, using training-set
+statistics to handle the mixed physical scales (temperatures in \textdegree{}C,
+pressures in MPa, powers in MW).
+
+The training dataset comprises 76{,}600 strictly unique Latin Hypercube-sampled
+FMU trajectories (3.98~GB, 720~steps each), collected with the corrected
+\texttt{reset()} LHS application logic.
+The 80/10/10 train/validation/test split yields 61{,}280 training and
+7{,}660 validation trajectories.
+After surrogate training on the DGX Spark GB10 GPU (200~epochs, early-stop
+patience 20), 500{,}000 fine-tuning steps on the live FMU correct any residual
+surrogate bias before surrogate-path policy deployment.
 
 \subsection{Deployment Path}
 

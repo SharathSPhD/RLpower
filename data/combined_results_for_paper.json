@@ -1,0 +1,146 @@
+{
+  "fmu_5m_manual_pid": {
+    "rl_mean_reward": 141.42399983050615,
+    "pid_mean_reward": 114.31955201403989,
+    "reward_improvement_pct": 23.709371965436326,
+    "rl_violation_rate": 0.0,
+    "pid_violation_rate": 0.0,
+    "per_phase": [
+      {
+        "phase": 0,
+        "episode_length_steps": 120,
+        "rl_mean_reward": 141.42399983050615,
+        "pid_mean_reward": 114.31955201403989,
+        "reward_improvement_pct": 23.709371965436326,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 1,
+        "episode_length_steps": 360,
+        "rl_mean_reward": 416.2078092836594,
+        "pid_mean_reward": 335.61931162964675,
+        "reward_improvement_pct": 24.011877404331642,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 2,
+        "episode_length_steps": 720,
+        "rl_mean_reward": 854.9412535813123,
+        "pid_mean_reward": 664.1836150632552,
+        "reward_improvement_pct": 28.72061794231443,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 3,
+        "episode_length_steps": 1080,
+        "rl_mean_reward": 773.2595433656413,
+        "pid_mean_reward": 1161.704720011935,
+        "reward_improvement_pct": -33.43751384964405,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 4,
+        "episode_length_steps": 360,
+        "rl_mean_reward": 338.57037593881904,
+        "pid_mean_reward": 402.4660430746919,
+        "reward_improvement_pct": -15.876039292054264,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 5,
+        "episode_length_steps": 720,
+        "rl_mean_reward": 284.6115557981124,
+        "pid_mean_reward": 820.9341476250332,
+        "reward_improvement_pct": -65.33076902426969,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 6,
+        "episode_length_steps": 360,
+        "rl_mean_reward": 255.39599962289384,
+        "pid_mean_reward": 415.9581935900989,
+        "reward_improvement_pct": -38.60056045080415,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      }
+    ]
+  },
+  "fmu_5m_zn_pid_5ep": {
+    "rl_mean_reward": 141.42399983050618,
+    "pid_mean_reward": 108.55239766109199,
+    "reward_improvement_pct": 30.28178361544695,
+    "rl_violation_rate": 0.0,
+    "pid_violation_rate": 0.0,
+    "per_phase": [
+      {
+        "phase": 0,
+        "episode_length_steps": 120,
+        "rl_mean_reward": 141.42399983050618,
+        "pid_mean_reward": 108.55239766109199,
+        "reward_improvement_pct": 30.28178361544695,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 1,
+        "episode_length_steps": 360,
+        "rl_mean_reward": 418.12587742069235,
+        "pid_mean_reward": 315.6081746126373,
+        "reward_improvement_pct": 32.48258792205102,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 2,
+        "episode_length_steps": 720,
+        "rl_mean_reward": 854.9771820268785,
+        "pid_mean_reward": 614.7431091105952,
+        "reward_improvement_pct": 39.0787744271686,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 3,
+        "episode_length_steps": 1080,
+        "rl_mean_reward": 812.00313684087,
+        "pid_mean_reward": 1068.8095805909356,
+        "reward_improvement_pct": -24.027333625493828,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 4,
+        "episode_length_steps": 360,
+        "rl_mean_reward": 343.54284657691215,
+        "pid_mean_reward": 377.7538023507461,
+        "reward_improvement_pct": -9.056415993922514,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 5,
+        "episode_length_steps": 720,
+        "rl_mean_reward": 292.8076913754361,
+        "pid_mean_reward": 766.6724132163223,
+        "reward_improvement_pct": -61.80797869748884,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      },
+      {
+        "phase": 6,
+        "episode_length_steps": 360,
+        "rl_mean_reward": 254.29535472194902,
+        "pid_mean_reward": 390.010334245843,
+        "reward_improvement_pct": -34.79779062418333,
+        "rl_violation_rate": 0.0,
+        "pid_violation_rate": 0.0
+      }
+    ]
+  }
+}

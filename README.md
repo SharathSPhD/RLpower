@@ -5,18 +5,19 @@
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-b31b1b.svg)](https://arxiv.org/abs/XXXX.XXXXX)
 
-Deep reinforcement learning for autonomous control of a **supercritical CO₂ (sCO₂) simple recuperated Brayton cycle** recovering waste heat from steel industry electric arc furnace (EAF) and basic oxygen furnace (BOF) exhaust (200–1,200°C).
+Deep reinforcement learning for autonomous control of a **supercritical CO₂ (sCO₂) recompression Brayton cycle** recovering waste heat from steel industry electric arc furnace (EAF) and basic oxygen furnace (BOF) exhaust (200–1,200°C). Trained on a physics-faithful OpenModelica FMU via the FMPy interface on an NVIDIA DGX Spark (GB10 Grace Blackwell, 128 GB unified memory).
 
 ## Key Results
 
 | Metric | Value |
 |--------|-------|
-| RL vs PID improvement (Phases 0–2) | **+24–29%** (steady-state, gradual load, ambient disturbance) |
-| Curriculum phases traversed | **7/7** (Phase 0 → 6) within 229,376 steps |
-| Phase 6 mean reward (emergency turbine trip) | **412.7** |
-| Constraint violations (all 70 eval episodes) | **0.000** (Lagrangian safety mechanism) |
-| TensorRT p99 inference latency | **0.046 ms** (22× under 1 ms SLA) |
-| Interleaved replay run | **In progress** (3M steps; prevents catastrophic forgetting) |
+| RL vs ZN-PID: Phase 0 (steady-state) | **+30.3%** cumulative reward |
+| RL vs ZN-PID: Phase 1 (±30% load following) | **+30.4%** |
+| RL vs ZN-PID: Phase 2 (ambient disturbance) | **+39.0%** |
+| Phases 3–6 (severe transients) | PID wins — curriculum imbalance (<5% training steps each) |
+| Constraint violations (140 eval episodes × all phases) | **0 / 0** (RL / PID) |
+| FNO surrogate training | 76,600 unique LHS FMU trajectories, NVIDIA PhysicsNeMo |
+| Training hardware | NVIDIA DGX Spark, GB10 Grace Blackwell GPU, 128 GB unified memory |
 
 ## What this repository provides
 

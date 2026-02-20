@@ -91,12 +91,24 @@ def load_configs(project_root: Path) -> dict:
     # Safety bounds from constraints.yaml
     hard = safety_cfg.get("hard_constraints", {})
     safety = {
-        "T_compressor_inlet_min": hard.get("T_compressor_inlet_min_c", 32.2),
-        "surge_margin_min": hard.get("surge_margin_min_fraction", 0.05),
+        "T_compressor_inlet_min": hard.get(
+            "compressor_inlet_temp_min_c",
+            hard.get("T_compressor_inlet_min_c", 32.2),
+        ),
+        "surge_margin_min": hard.get(
+            "surge_margin_main_min",
+            hard.get("surge_margin_min_fraction", 0.05),
+        ),
     }
 
     # Episode + normalization from env.yaml
     episode = env_cfg.get("episode", {})
+    phases_cfg = curriculum_cfg.get("phases", [])
+    phase_0_cfg = next((phase for phase in phases_cfg if phase.get("id") == 0), {})
+    phase_0_steps = int(phase_0_cfg.get("episode_length_steps", episode.get("max_steps", 720)))
+    phase_0_setpoint = float(
+        phase_0_cfg.get("setpoint", {}).get("W_net_mw", 10.0)
+    )
     norm = env_cfg.get("normalization", {})
 
     # PPO from ppo_fmu.yaml
@@ -116,10 +128,10 @@ def load_configs(project_root: Path) -> dict:
         "action_config": action_config,
         "history_steps": obs_section.get("history_steps", 5),
         "step_size": 5.0,
-        "episode_max_steps": episode.get("max_steps", 720),
+        "episode_max_steps": phase_0_steps,
         "reward": env_cfg.get("reward", {}),
         "safety": safety,
-        "setpoint": {"W_net": 10.0},
+        "setpoint": {"W_net": phase_0_setpoint},
         # Normalization
         "normalization": norm,
         # PPO
@@ -190,18 +202,32 @@ def main():
 
     # Resume from checkpoint if requested
     if args.resume:
+        from pathlib import Path as _Path
         from sco2rl.curriculum.phase import CurriculumPhase
         from sco2rl.training.lagrangian_ppo import LagrangianPPO
+        from stable_baselines3.common.vec_env import VecNormalize
         print(f"[train_fmu] Resuming from checkpoint: {args.resume}")
         data = trainer._checkpoint_mgr.load(args.resume)
+
+        # Restore VecNormalize running stats BEFORE loading the policy so that
+        # the policy is linked to an env with the correct observation statistics.
+        # Without this, the policy would see fresh-start normalization (mean=0,
+        # std=1) and make poor decisions, preventing curriculum advancement.
+        vecnorm_path = data.get("vecnorm_path")
+        if vecnorm_path and _Path(vecnorm_path).exists():
+            trainer._env = VecNormalize.load(vecnorm_path, trainer._env.venv)
+            # Keep curriculum callback pointing at the new VecNormalize instance
+            trainer._curriculum_callback.vecnorm = trainer._env
+            print(f"[train_fmu] Restored VecNormalize stats from {vecnorm_path}")
+        else:
+            print("[train_fmu] No VecNormalize stats in checkpoint; using fresh normalization")
+
         # Restore policy weights + Lagrange multipliers (LagrangianPPO.load() reads
         # both the .zip and the companion _multipliers.pkl via CheckpointManager.save())
         trainer._policy = LagrangianPPO.load(data["model_path"], env=trainer._env)
         # Restore curriculum phase so scheduler picks up where training left off
         phase = CurriculumPhase(int(data["curriculum_phase"]))
         trainer._curriculum_callback.scheduler._phase = phase
-        # VecNormalize stats were saved as null placeholder; fresh stats is acceptable
-        # (policy weights are what matter for warm-starting)
         print(f"[train_fmu] Resumed from phase {phase.name} @ step {data['total_timesteps']:,}")
 
     print("[train_fmu] Starting training...")
