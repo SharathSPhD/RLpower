@@ -103,9 +103,10 @@ fidelity_gate:
 
 # ─── SKRL PPO on Surrogate ───────────────────────────────────────────────────
 skrl_ppo:
-  n_envs: 1024                        # Vectorized GPU environments
-  timesteps_are_transitions: true     # Convert to trainer timesteps by dividing by n_envs
-  rollout_steps: 2048
+  n_envs: 1024                        # Vectorized GPU environments (GB10 CUDA)
+  timesteps_are_transitions: true     # total_timesteps = desired env transitions (not per-env)
+  rollout_steps: 16                   # Steps per env per rollout. 5M/1024 ≈ 4883 trainer steps
+                                      # → 4883/16 ≈ 305 gradient updates (meaningful learning)
   learning_epochs: 10
   mini_batches: 8
   discount_factor: 0.99
@@ -116,7 +117,9 @@ skrl_ppo:
   entropy_loss_scale: 0.01
   value_loss_scale: 0.5
   grad_norm_clip: 0.5
-  total_timesteps: 5_000_000
+  total_timesteps: 5_000_000          # 5M env transitions across all 1024 envs
+                                      # ≈ 4883 trainer steps ≈ 305 gradient updates
+                                      # At ~62K trans/s: ~80 seconds on DGX Spark
   checkpoint_dir: "artifacts/checkpoints/surrogate_ppo"
   tensorboard_log: "artifacts/logs/surrogate_ppo"
   seed: 42

@@ -112,6 +112,7 @@ class SCO2SurrogateFNO:
 
         self._input_dim = in_ch
         self._output_dim = out_ch
+        self._modes = modes  # needed for predict_next_state context length
 
     def forward(self, x):
         """Forward pass.
@@ -128,7 +129,11 @@ class SCO2SurrogateFNO:
         return self.fno(x)
 
     def predict_next_state(self, state, action):
-        """Autoregressive one-step state prediction.
+        """One-step state prediction from the FNO surrogate.
+
+        The FNO requires T >= num_fno_modes for its spectral convolution.
+        When called step-by-step (T=1), we replicate the state-action pair
+        across T_ctx timesteps, run the FNO, and return the last output.
 
         Parameters
         ----------
@@ -142,9 +147,11 @@ class SCO2SurrogateFNO:
         Tensor, shape (B, n_state) -- predicted next state.
         """
         torch = _get_torch()
-        x = torch.cat([state, action], dim=-1).unsqueeze(-1)
-        out = self.fno(x)
-        return out.squeeze(-1)
+        x_single = torch.cat([state, action], dim=-1).unsqueeze(-1)  # (B, C, 1)
+        T_ctx = max(self._modes * 2, 32)
+        x = x_single.expand(-1, -1, T_ctx).contiguous()  # (B, C, T_ctx)
+        out = self.fno(x)  # (B, output_dim, T_ctx)
+        return out[:, :, -1]  # (B, output_dim)
 
     # Make SCO2SurrogateFNO behave as nn.Module at runtime (duck-typing via __init_subclass__)
     def __init_subclass__(cls, **kwargs):
@@ -208,9 +215,24 @@ def _make_surrogate_fno(config: dict):
             return self.fno(x)
 
         def predict_next_state(self, state, action):
+            """One-step surrogate prediction.
+
+            The FNO requires T >= num_fno_modes (default 16) for its spectral
+            convolution layers.  When called step-by-step from SurrogateEnv,
+            the input is (B, C, 1) which is too short.  We repeat the
+            current state-action pair across T_ctx timesteps to provide the
+            required context, then return the last output timestep.
+
+            This is equivalent to assuming the system was at the current
+            operating point for the last T_ctx steps — a conservative warm-up
+            that avoids transient artefacts from arbitrary initial history.
+            """
             import torch
-            x = torch.cat([state, action], dim=-1).unsqueeze(-1)
-            return self.fno(x).squeeze(-1)
+            x_single = torch.cat([state, action], dim=-1).unsqueeze(-1)  # (B, C, 1)
+            T_ctx = max(modes * 2, 32)  # context length >= 2*modes for spectral validity
+            x = x_single.expand(-1, -1, T_ctx).contiguous()  # (B, C, T_ctx)
+            out = self.fno(x)  # (B, output_dim, T_ctx)
+            return out[:, :, -1]  # last predicted timestep -> (B, output_dim)
 
     return _Wrapper()
 

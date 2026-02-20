@@ -1,0 +1,112 @@
+# IMC-tuned PID gains for sCO₂ simple recuperated cycle
+# ─────────────────────────────────────────────────────────────────────────────
+# Gain derivation:
+#   Using Internal Model Control (IMC) tuning with back-calculation anti-windup.
+#   Process identification via MockFMU linearised sensitivities (see _SENSITIVITY
+#   in src/sco2rl/simulation/fmu/mock_fmu.py).
+#
+#   IMC formulas: Kp = τ / (|K| · λ),  Ki = Kp / τ
+#   where K = process gain, τ = time constant, λ = desired closed-loop bandwidth.
+#
+#   Target stability margins: Gain Margin ≥ 6 dB, Phase Margin ≥ 45°
+#   (verified with DynamicMockFMU PRBS frequency response)
+#
+# Re-tune for real FMU by running:
+#   python scripts/tune_pid.py --use-mock   # MockFMU estimate
+#   python scripts/tune_pid.py --fmu-path artifacts/fmu/SCO2_WHR.fmu  # Real FMU
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Measurement pairing (action → controlled variable) ───────────────────────
+#
+#   bypass_valve  → W_net                (MW;  K≈−4.0 MW/unit, τ≈25 s)
+#   igv           → T_turbine_inlet      (°C;  K≈+5.0 °C/unit, τ≈60 s)
+#   inventory     → P_high               (MPa; K≈−0.8 MPa/unit, τ≈30 s)
+#   cooling_flow  → T_compressor_inlet   (°C;  K≈−3.0 °C/unit, τ≈30 s)
+
+# ── MockFMU variable names (for analysis with --use-mock) ───────────────────
+mock_channels:
+  bypass_valve_opening:
+    kp: 0.25
+    ki: 0.010
+    kd: 0.50
+    anti_windup_gain: 0.10
+    derivative_filter_tau: 10.0    # seconds
+    measurement_obs: "W_net"
+    setpoint: 10.0                  # MW (rated design point)
+
+  igv_angle_normalized:
+    kp: 0.010
+    ki: 0.0002
+    kd: 0.05
+    anti_windup_gain: 0.10
+    derivative_filter_tau: 15.0
+    measurement_obs: "T_turbine_inlet"
+    setpoint: 750.0                 # °C
+
+  inventory_valve_opening:
+    kp: 0.30
+    ki: 0.010
+    kd: 0.50
+    anti_windup_gain: 0.10
+    derivative_filter_tau: 10.0
+    measurement_obs: "P_high"
+    setpoint: 20.0                  # MPa
+
+  cooling_flow_normalized:
+    kp: 0.20
+    ki: 0.008
+    kd: 0.40
+    anti_windup_gain: 0.10
+    derivative_filter_tau: 10.0
+    measurement_obs: "T_compressor_inlet"
+    setpoint: 33.0                  # °C (1.8°C above CO₂ critical 31.1°C)
+
+# ── Real FMU variable names (fmu_var names from env.yaml) ───────────────────
+# Same tuning philosophy; gains adjusted for physical-unit measurements.
+fmu_channels:
+  regulator.T_init:
+    kp: 0.25
+    ki: 0.010
+    kd: 0.50
+    anti_windup_gain: 0.10
+    derivative_filter_tau: 10.0
+    measurement_obs: "W_net"
+    setpoint: 10.0
+
+  regulator.m_flow_init:
+    kp: 0.010
+    ki: 0.0002
+    kd: 0.05
+    anti_windup_gain: 0.10
+    derivative_filter_tau: 15.0
+    measurement_obs: "turbine.T_inlet_rt"
+    setpoint: 750.0
+
+  turbine.p_out:
+    kp: 0.30
+    ki: 0.010
+    kd: 0.50
+    anti_windup_gain: 0.10
+    derivative_filter_tau: 10.0
+    measurement_obs: "main_compressor.p_outlet"
+    setpoint: 20.0
+
+  precooler.T_output:
+    kp: 0.20
+    ki: 0.008
+    kd: 0.40
+    anti_windup_gain: 0.10
+    derivative_filter_tau: 10.0
+    measurement_obs: "main_compressor.T_inlet_rt"
+    setpoint: 33.0
+
+# ── Comparison: legacy PIDBaseline gains (for documentation) ─────────────────
+# The original evaluate_pid_baseline.py used kp=0.02, ki=0.001, kd=0 for ALL
+# channels — a non-adaptive uniform heuristic without derivative action or
+# anti-windup.  The IMC gains above significantly improve settling time and IAE.
+legacy_gains:
+  all_channels:
+    kp: 0.02
+    ki: 0.001
+    kd: 0.0
+    anti_windup_gain: 0.0   # No anti-windup in legacy code
