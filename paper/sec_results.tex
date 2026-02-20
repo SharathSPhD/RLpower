@@ -294,4 +294,19 @@ Key observations:
   \label{fig:fidelity}
 \end{figure}
 
+\subsection{Control System Time-Series Response}
+\label{sec:timeseries}
+
+Beyond aggregate reward metrics, Figure~\ref{fig:wnet_tracking} (in
+Section~\ref{sec:control_analysis}) shows the net-power time-series
+trajectory $W_{\mathrm{net}}(t)$ for Phase~0 under the IMC-tuned PID
+controller.
+The trajectory confirms that the PID baseline tracks the rated setpoint to
+within ±2\% under steady-state conditions, but exhibits a pronounced 66\%
+overshoot following a $+$20\% step, motivating the RL agent's implicit
+multi-channel coupling strategy.
+Full control-theoretic analysis, including step-response metrics, Bode plots,
+and cross-phase IAE/ITAE comparisons, is presented in
+Section~\ref{sec:control_analysis}.
+
 %% ---------------------------------------------------------------------------

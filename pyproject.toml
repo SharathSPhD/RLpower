@@ -59,6 +59,13 @@ all = [
     "sco2rl[deploy]",
 ]
 
+# Control analysis and interactive notebooks
+control = [
+    "python-control>=0.10.0",
+    "ipywidgets>=8.0",
+    "matplotlib>=3.8",
+]
+
 # Development + testing
 dev = [
     "pytest>=8.0",
@@ -73,6 +80,8 @@ dev = [
 
 [project.scripts]
 sco2-build-fmu = "sco2rl.scripts.build_fmu:main"
+sco2-analyze-control = "sco2rl.scripts.run_control_analysis:main"
+sco2-tune-pid = "sco2rl.scripts.tune_pid:main"
 sco2-train-fmu = "sco2rl.scripts.train_fmu:main"
 sco2-train-surrogate = "sco2rl.scripts.train_surrogate:main"
 sco2-collect-trajectories = "sco2rl.scripts.collect_trajectories:main"

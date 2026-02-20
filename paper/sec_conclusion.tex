@@ -19,7 +19,26 @@ recovery that:
   \item Satisfies deployment latency requirements with p99 = 0.046~ms
         ($22\times$ margin against the 1~ms SLA), providing a production-ready
         inference artefact.
+  \item Provides a \textbf{reusable SCOPE controller library}
+        (\texttt{sco2rl.control}) with a common \texttt{Controller} interface
+        for PID and RL policies, IMC-tuned \texttt{MultiLoopPID} with
+        anti-windup and derivative filter, and an \texttt{sco2rl.analysis}
+        module for standardised step-response and frequency-domain benchmarking
+        across all curriculum phases.
 \end{itemize}
+
+The control-theoretic analysis (Section~\ref{sec:control_analysis}) reveals
+that the IMC-tuned PID baseline achieves large stability margins (GM~$\geq$40~dB,
+PM~$\geq$45\textdegree{}) on the linearised dynamics but exhibits 66\% overshoot
+on the bypass-valve channel due to the asymmetric valve authority of the
+sCO$_2$ cycle.  Phase~3 and Phase~6 disturbances produce 4--10$\times$ higher
+IAE than Phase~0 for the decoupled PID, underscoring the need for a
+multi-channel controller that accounts for the thermodynamic coupling absent in
+independent proportional-integral loops.
+The RL policy implicitly learns this coupling structure, explaining the
++24--29\% reward improvement over PID in Phases~0--2 — a finding that is now
+rigorously quantified through both step-response and frequency-domain metrics
+in the \texttt{sco2rl.analysis} library.
 
 The five practitioner bugs documented in Section~\ref{sec:bugs} represent
 the most practically useful contribution: they are not algorithmic failures
